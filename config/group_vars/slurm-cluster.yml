@@ -66,7 +66,7 @@ partition_settings:
     default: false
   cpu:
     slurm_def_mem_per_cpu: 1000
-    slurm_allow_qos: rtx_qos,a6000_qos,a100_qos
+    slurm_allow_qos: cpu_qos,cpu_128_qos
     slurm_max_job_timelimit: 30-00
     default: false
 
