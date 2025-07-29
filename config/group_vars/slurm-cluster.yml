@@ -43,7 +43,7 @@ partition_settings:
   rtx2080ti:
     slurm_def_mem_per_cpu: 5700
     slurm_def_cpu_per_gpu: 4
-    slurm_allow_qos: rtx_qos
+    slurm_allow_qos: rtx_qos,eight_rtx_qos
     slurm_max_job_timelimit: 10080
     default: false
   rtx2080ti_sm:
