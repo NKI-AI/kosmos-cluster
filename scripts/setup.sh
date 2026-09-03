@@ -22,7 +22,7 @@ JMESPATH_VERSION="${JMESPATH_VERSION:-1.1.0}"    # jmespath version (matches kub
 MARKUPSAFE_VERSION="${MARKUPSAFE_VERSION:-3.0.2}"  # MarkupSafe version
 PIP="${PIP:-pip3}"                              # Pip binary to use
 PYTHON_BIN="${PYTHON_BIN:-/usr/bin/python3}"    # Python3 path
-VENV_DIR="${VENV_DIR:-/opt/deepops/env}"        # Path to python virtual environment to create
+VENV_DIR="${VENV_DIR:-/opt/kosmos-cluster/env}"        # Path to python virtual environment to create
 
 ###
 

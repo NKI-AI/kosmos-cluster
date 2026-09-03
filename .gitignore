@@ -13,7 +13,8 @@
 
 # project-specific
 /admin.conf
-/config*/
+# kosmos-cluster: site config is version-controlled in this fork
+#/config*/
 !/config.example/
 /roles/galaxy/
 /collections/*
