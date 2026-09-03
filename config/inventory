@@ -26,9 +26,9 @@ herakles            ansible_host=rhpc-herakles
 gaia                ansible_host=rhpc-gaia
 
 # RTX2080Ti small nodes
-plato               ansible_host=rhpc-plato
-schrodinger         ansible_host=rhpc-schrodinger
-carlos              ansible_host=carlos.rhpc.nki.nl
+# plato             ansible_host=rhpc-plato               Phased out
+# schrodinger       ansible_host=rhpc-schrodinger         Phased out   
+# carlos            ansible_host=carlos.rhpc.nki.nl       Phased out 
 
 # RTX2080Ti large node
 alanturing          ansible_host=rhpc-alanturing
@@ -38,18 +38,14 @@ hamilton            ansible_host=rhpc-hamilton
 roentgen            ansible_host=rhpc-roentgen
 
 # P6000 node
-# mariecurie          ansible_host=rhpc-mariecurie
+# mariecurie        ansible_host=rhpc-mariecurie          Phased out
 
 # VMs/controller
 atlas               ansible_host=atlas
 
 # Storage
-# rhea                ansible_host=rhpc-rhea
-# kronos              ansible_host=rhpc-kronos
-
-# [storage]
-# rhea                ansible_host=rhpc-rhea
-# kronos              ansible_host=rhpc-kronos
+# rhea              ansible_host=rhpc-rhea
+# kronos            ansible_host=rhpc-kronos
 
 # Outside slurm cluster
 # [outside]
@@ -63,11 +59,13 @@ galileo
 aristarchus
 alanturing
 herakles
-# hamilton
-# roentgen
-plato
-schrodinger
-carlos
+hamilton
+# mariecurie                                                Phased out
+# roentgen  
+# plato
+# schrodinger
+# carlos
+
 
 [mount-scratch]
 gaia
@@ -89,11 +87,11 @@ kosmos
 aristarchus
 ptolemaeus
 galileo
-carlos
+# carlos
 euctemon
 eudoxus
-plato
-schrodinger
+# plato
+# schrodinger
 alanturing
 roentgen
 # mariecurie
@@ -115,3 +113,4 @@ slurm-login
 #ansible_ssh_private_key_file='~/.ssh/id_rsa'
 # SSH bastion/jumpbox
 #ansible_ssh_common_args='-o ProxyCommand="ssh -W %h:%p -q ubuntu@10.0.0.1"'
+
