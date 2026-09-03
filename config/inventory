@@ -11,41 +11,41 @@
 
 [all]
 # A6000 nodes
-aristarchus         ansible_host=rhpc-aristarchus
-ptolemaeus          ansible_host=rhpc-ptolemaeus
-galileo             ansible_host=rhpc-galileo
+aristarchus         ansible_host=aristarchus
+ptolemaeus          ansible_host=ptolemaeus
+galileo             ansible_host=galileo
 
 # A100 nodes
-eudoxus             ansible_host=rhpc-eudoxus
-euctemon            ansible_host=rhpc-euctemon
+eudoxus             ansible_host=eudoxus
+euctemon            ansible_host=euctemon
 
 # H100 nodes
-herakles            ansible_host=rhpc-herakles
+herakles            ansible_host=herakles
 
 # CPU nodes
-gaia                ansible_host=rhpc-gaia
+gaia                ansible_host=gaia
 
 # RTX2080Ti small nodes
-# plato             ansible_host=rhpc-plato               Phased out
-# schrodinger       ansible_host=rhpc-schrodinger         Phased out   
+# plato             ansible_host=plato               Phased out
+# schrodinger       ansible_host=schrodinger         Phased out
 # carlos            ansible_host=carlos.rhpc.nki.nl       Phased out 
 
 # RTX2080Ti large node
-alanturing          ansible_host=rhpc-alanturing
-hamilton            ansible_host=rhpc-hamilton
+alanturing          ansible_host=alanturing
+hamilton            ansible_host=hamilton
 
 # RTX8000 nodes
-roentgen            ansible_host=rhpc-roentgen
+roentgen            ansible_host=roentgen
 
 # P6000 node
-# mariecurie        ansible_host=rhpc-mariecurie          Phased out
+# mariecurie        ansible_host=mariecurie          Phased out
 
 # VMs/controller
 atlas               ansible_host=atlas
 
 # Storage
-# rhea              ansible_host=rhpc-rhea
-# kronos            ansible_host=rhpc-kronos
+# rhea              ansible_host=rhea
+# kronos            ansible_host=kronos
 
 # Outside slurm cluster
 # [outside]
