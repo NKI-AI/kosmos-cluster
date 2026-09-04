@@ -36,7 +36,7 @@ Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
    the fact-cache warning below. The script also appends a `source .../activate`
    line to your `.bashrc`.
 2. `source /opt/kosmos-cluster/env-26.07/bin/activate` for everything below.
-3. Fix the default partition (section 2, "Urgent").
+3. Fix the default partition (section 2, "Urgent"). Done: `rtx2080ti`.
 4. Decide what to do with herakles (section 2, "Site config").
 5. `ansible-playbook playbooks/slurm-cluster.yml --syntax-check`.
 6. `ansible-playbook -K playbooks/slurm-cluster/slurm.yml --check --diff --limit gaia`
@@ -116,8 +116,8 @@ admins.
 
 **By priority:**
 
-- **Blocking the first Slurm run:** no default partition after the phase-out
-  (5a). herakles differs from every other node (5b).
+- **Blocking the first Slurm run:** herakles differs from every other node
+  (5b). (The missing default partition, 5a, is fixed on this branch.)
 - **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
   dead per-host overrides in host_vars silently ignored (5a); nvtop builds an
   unpinned git HEAD (4b); apptainer pin does not match the nodes (4c).
@@ -233,15 +233,18 @@ area has several leftovers that need a decision (update or remove).
 
 ### Inventory and host_vars (chunk 5a)
 
-- **Urgent, pre-existing on master: no default partition after the
-  phase-out.** `partition_settings` marks `rtx2080ti_sm` as the default
+- **Fixed on this branch, still open on master: no default partition after
+  the phase-out.** `partition_settings` marked `rtx2080ti_sm` as the default
   partition, but since e812a659 (2026-09-03) no active node in the
   inventory belongs to it (plato, schrodinger, carlos are commented out).
   The slurm.conf template only emits partitions that have nodes, so the next
-  render, on either branch, produces a slurm.conf with no `Default=YES`
-  partition and jobs submitted without `-p` are rejected. The live config on
-  gaia still has the old 17-node layout. Pick a new default partition in
-  `config/group_vars/slurm-cluster.yml` before running the Slurm playbook.
+  render on master produces a slurm.conf with no `Default=YES` partition and
+  jobs submitted without `-p` are rejected. The live config on gaia still has
+  the old layout with `rtx2080ti_sm` as default. This branch moves
+  `default: true` to `rtx2080ti` (alanturing, hamilton), the closest match to
+  the old default: the smallest GPU partition, so a forgotten `-p` lands
+  somewhere cheap. Tell users, and update any documentation that names the
+  default partition, before the first real Slurm run.
 - `slurm_def_mem_per_cpu` and `slurm_max_job_timelimit` in
   `config/host_vars/*` are dead: the slurm.conf template reads both only
   from `partition_settings[<partition>]`. gaia (1900 vs 1000), galileo
