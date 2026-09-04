@@ -18,7 +18,13 @@ Rule used while porting: port `master` as is. Deviate only with a stated
 reason, and record it here. Design changes that nobody has asked for are
 not applied; they go into section 2.
 
-**Status (2026-09-04):** port complete; env-26.07 built, syntax checks pass, `--check` runs starting. Everything on `master` up
+**Status (2026-09-04, end of day):** port complete. env-26.07 built, syntax
+checks pass, `--check --diff` done on all compute nodes except gaia for the
+non-Slurm playbooks (see "Check-run results"), rendered slurm.conf matches
+the live one. Blocked: slurm.yml and anything touching atlas/kosmos (admin
+login to kosmos), gaia (open-files limit). Decisions pending with the
+admins: docker version pin, motd landscape task, nvtop pin, herakles driver
+metapackages/reboot, nofile limit, kosmos access. Everything on `master` up
 to e812a659 has been ported, dropped with a row below, or superseded upstream.
 
 ## Before the first run
@@ -200,7 +206,10 @@ change:
 `prometheus-node-exporter.yml` and `nvidia-dcgm-exporter.yml` both start by
 importing `container/docker.yml` (kubespray's docker role), and both nodes
 failed there, so the exporter roles themselves are still untested in check
-mode (rerun with `-e docker_install=no` to skip docker). Log:
+mode. To skip docker, pass a real boolean: `-e '{"docker_install": false}'`.
+`-e docker_install=no` does NOT work: it arrives as the string "no", which
+the playbook's `when: docker_install | default('yes')` treats as true
+(verified locally). Log:
 `~kosmas-ans/check-exporters.log`.
 
 - **herakles:** check-mode artifact, same pattern as DCGM: the docker apt
@@ -248,6 +257,40 @@ Everything else, including `ClusterName=kosmos`, every other node line,
 the prolog/epilog, cgroup and health-check settings, is byte-identical.
 This is the strongest evidence so far that the ported Slurm role and site
 config reproduce the running cluster.
+
+### 2026-09-04, all compute nodes except gaia, `--check --diff`
+
+Nine nodes (`--limit 'slurm-node:!gaia'`), twelve playbooks requested; the
+invocation stopped after nvidia-dcgm because of the herakles check-mode
+artifact, so prometheus-node-exporter, nvidia-dcgm-exporter and apptainer
+did not run on any node. (When one host fails in a playbook,
+`ansible-playbook a.yml b.yml ...` does not start the following playbooks
+for anyone. Keep nvidia-dcgm out of a combined check run until herakles has
+the CUDA keyring.) Log: `~kosmas-ans/check-allnodes.log`. Findings, beyond
+what the two-node run already showed:
+
+- **Only herakles differs.** On the other eight nodes the driver, chrony,
+  rsyslog, DCGM and mount playbooks are idle. In particular the 550 pins on
+  alanturing, hamilton, roentgen and the 580 branch elsewhere produce no
+  driver change anywhere (deviation 11 confirmed on every node).
+- **Same on every node:** nvtop clone (unpinned), motd overwriting
+  `50-landscape-sysinfo`, `dcmtk` missing (software.yml never ran with it),
+  `nhc.conf` cosmetic changes (2 to 9 lines: `check_hw_physmem` rounding
+  and reordered/added commented `check_hw_eth` lines).
+- herakles: as in the two-node run (driver metapackages + reboot, first
+  chrony, first NHC, DCGM artifact, also `linux-tools-generic`).
+
+Still untested in check mode: the exporter roles, apptainer.yml, and
+everything that needs atlas or kosmos. Command for the exporters and
+apptainer:
+
+```
+ansible-playbook -K --check --diff --limit 'slurm-node:!gaia' \
+  -e '{"docker_install": false}' \
+  playbooks/slurm-cluster/prometheus-node-exporter.yml \
+  playbooks/slurm-cluster/nvidia-dcgm-exporter.yml \
+  playbooks/container/apptainer.yml
+```
 
 ## 1. Conscious deviations from master
 
