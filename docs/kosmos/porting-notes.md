@@ -5,6 +5,7 @@ small set of overlay commits**. The overlay ports what is on `master` (fork
 point: DeepOps 23.08, commit d248b658). Contents:
 
 - **Before the first run**: the test recipe.
+- **Check-run results**: what each `--check --diff` run showed, per date and node.
 - **Running playbooks from teuwen-ansible**: how ssh authentication works
   (Kerberos, not keys), which hosts are the exception, ticket expiry.
 - **1. Conscious deviations from master**: every place where the branch
@@ -137,6 +138,62 @@ identity for free.
 `/opt/kosmos-cluster/env-26.07` (ansible-core 2.17, this branch). Both stay
 until the merge; then the old one goes. The root disk of teuwen-ansible was
 95 % full (1.6 GB free) on 2026-09-04.
+
+## Check-run results
+
+### 2026-09-04, herakles and eudoxus, `--check --diff`, env-26.07
+
+Nine playbooks in one invocation (nvtop, motd, mount_scratch_disks,
+nvidia-driver, software, chrony-client, rsyslog-client, nhc, nvidia-dcgm);
+the run stopped at nvidia-dcgm on herakles, so prometheus-node-exporter and
+nvidia-dcgm-exporter are still untested. Log: `~kosmas-ans/check-all.log`.
+No playbook failed for a reason related to the port. What a real run would
+change:
+
+- **No change (good):** rsyslog-client on both; nvidia-driver, chrony and
+  nvidia-dcgm on eudoxus (the per-host driver pins do what deviation 11
+  says). mount_scratch_disks reported no change, but its `exportfs`/`mount -a`
+  command tasks are skipped in check mode, so that says nothing yet.
+- **nvtop, both nodes:** the git clone reports a change (unpinned HEAD,
+  section 2). Build steps skipped in check mode.
+- **motd, both nodes:** the role would overwrite Ubuntu's current
+  `50-landscape-sysinfo` (a symlink to the caching wrapper) with its own
+  older copy. Same on gaia (section 2). Recommendation: drop that task from
+  `roles/motd`; only `00-header` is site content.
+- **nvidia-driver, herakles: would reboot the node.** herakles was
+  hand-driven with the `nvidia-driver-580-server` metapackage (a
+  `nvidia-driver-570-server` metapackage is still installed next to it);
+  the role's package list is `nvidia-headless-580-server`,
+  `nvidia-headless-no-dkms-580-server`, `nvidia-utils-580-server`,
+  `nvidia-kernel-source-580-server`. The two headless metapackages are
+  missing ("0 upgraded, 2 newly installed", no driver change), the role
+  would also create an empty `/etc/modprobe.d/nvidia.conf`, and because
+  packages changed it triggers its reboot task
+  (`nvidia_driver_skip_reboot: no`). Before the first real driver run on
+  herakles either install the two metapackages by hand or run with
+  `-e nvidia_driver_skip_reboot=yes`, then verify with a check run that the
+  role is idle.
+- **software, both nodes:** `dcmtk` (in `software_extra_packages`) is not
+  installed on either node; herakles also lacks `linux-tools-generic`. So
+  software.yml has not run since dcmtk was added. Harmless to apply.
+- **chrony-client, herakles:** still on Ubuntu's stock `chrony.conf`
+  (`ntp.ubuntu.com` pools); the role would switch it to the site template
+  (`0-3.pool.ntp.org` from `chrony_config_server`, `makestep 10 3`) and
+  restart chrony, which is what eudoxus already runs. Fine, unless the
+  admins prefer an NKI-internal NTP server, in which case set
+  `chrony_config_server` first.
+- **nhc, herakles:** full first install (deepops.nhc checks, nhc.conf,
+  sysconfig with `NHC_RM=slurm`), which is the intended state (section 2).
+  **nhc, eudoxus:** `nhc.conf` changes by 1 MB in the `check_hw_physmem`
+  bounds (26.07 template rounding) and the commented-out `check_hw_eth`
+  lines are reordered and gain the docker bridge. Cosmetic.
+- **nvidia-dcgm, herakles: check-mode artifact, not a bug.** The role
+  "installs" the CUDA keyring .deb (check mode does not really add the apt
+  source), so the following `apt install datacenter-gpu-manager` finds no
+  such package. A real run installs `datacenter-gpu-manager` 1:3.3.9, the
+  same as on gaia (checked with `apt-cache policy` there). To get past it in
+  check mode, install the keyring on herakles by hand first, or accept the
+  failure and run the exporter playbooks separately.
 
 ## 1. Conscious deviations from master
 
