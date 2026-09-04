@@ -20,19 +20,29 @@ to e812a659 has been ported, dropped with a row below, or superseded upstream.
 
 ## Before the first run
 
-Do these in order, on teuwen-ansible with the shared venv
-(`/opt/kosmos-cluster/env`, ansible-core 2.16):
+Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
 
-1. `ansible-galaxy role install -r roles/requirements.yml -p roles/galaxy` and
-   `ansible-galaxy collection install -r collections/requirements.yml -p collections`
-   (26.07 pins; the old `roles/galaxy` from 23.08 is not compatible).
-2. Fix the default partition (section 2, "Urgent").
-3. Decide what to do with herakles (section 2, "Site config").
-4. `ansible-playbook playbooks/slurm-cluster.yml --syntax-check`.
-5. `ansible-playbook -K playbooks/slurm-cluster/slurm.yml --check --diff --limit gaia`
+1. Build the 26.07 environment next to the shared one, without touching
+   `/opt/kosmos-cluster/env` (ansible-core 2.16, in use by the other admins):
+   `VENV_DIR=/opt/kosmos-cluster/env-26.07 bash scripts/setup.sh`. This gives
+   ansible 10.7 / core 2.17 and installs the 26.07 Galaxy roles and
+   collections into `roles/galaxy` and `collections` (both gitignored; the
+   old `roles/galaxy` from 23.08 is not compatible). Roles and collections
+   both come from `roles/requirements.yml`; there is no
+   `collections/requirements.yml` in 26.07. Use `bash scripts/setup.sh`, not
+   `./scripts/setup.sh`: the shebang is `bash --init-file`, so executing it
+   directly leaves you in a new interactive shell. Two harmless messages:
+   "Package(s) not found: ansible" (the version check on an empty venv) and
+   the fact-cache warning below. The script also appends a `source .../activate`
+   line to your `.bashrc`.
+2. `source /opt/kosmos-cluster/env-26.07/bin/activate` for everything below.
+3. Fix the default partition (section 2, "Urgent").
+4. Decide what to do with herakles (section 2, "Site config").
+5. `ansible-playbook playbooks/slurm-cluster.yml --syntax-check`.
+6. `ansible-playbook -K playbooks/slurm-cluster/slurm.yml --check --diff --limit gaia`
    and compare the rendered `slurm.conf` diff against `/etc/slurm/slurm.conf`
    on gaia. Expected differences: `KillWait`, the phased-out nodes disappearing.
-6. Only then consider a real run, playbook by playbook, starting with the
+7. Only then consider a real run, playbook by playbook, starting with the
    ones that are idempotent on the current nodes (motd, nvtop, create_mounts).
 
 ## 1. Conscious deviations from master
@@ -196,6 +206,15 @@ area has several leftovers that need a decision (update or remove).
   profile scripts only on the host that clones Spack (`slurm-master[0]`),
   while the install lives on shared NFS. Master's all-hosts play and zsh
   template (see deviation 5) would still be needed.
+
+### Ansible node (found while building env-26.07)
+
+- `ansible.cfg` sets `fact_caching_connection = /var/tmp/ansible_cache`, but
+  on teuwen-ansible that directory is `root:teu-ansible` mode 0700, so every
+  admin gets "error in 'jsonfile' cache ... disabling plugin" and facts are
+  gathered on every run instead of being cached. Harmless, but slow. Fix
+  once the shared setup is decided: make the directory group-writable for the
+  admin group, or point the cache at a per-user path.
 
 ### Top-level playbook wiring (chunk 4e)
 
