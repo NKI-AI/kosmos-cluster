@@ -82,7 +82,13 @@ identity for free.
   every inventory host, so `-k` is needed there even with `--limit gaia`),
   or a key in your `authorized_keys` on those two hosts. Why the controller
   and login node behave differently from the compute nodes is an open
-  question for the admins.
+  question for the admins. **A new admin account is not automatically
+  allowed on kosmos:** kosmas-ans (created 2026-09) is refused there with
+  password and Kerberos alike (PAM denies the account, the password prompt
+  just repeats), while atlas takes the password. Any `slurm.yml` run needs
+  both hosts (fact gathering from every inventory host, and kosmos is in
+  `slurm-login`), so check `ssh atlas` and `ssh kosmos` with the admin
+  account before the first run and get the account granted where it fails.
 - **Sudo on the nodes needs a password**: always `-K`. Same password as for
   `-k`.
 - Node home directories are NFS from rhea, shared by all nodes; an
