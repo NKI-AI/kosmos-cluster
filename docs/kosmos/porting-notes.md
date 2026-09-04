@@ -74,9 +74,8 @@ identity for free.
   playbook cannot connect" seen on 2026-09-03 (not confirmed from the error
   text; the directory appeared when an `ssh-keygen` created it). Fixed on
   this branch by dropping the override (deviation 0c): sockets now go to
-  `~/.ansible/cp`, which Ansible creates itself. No key pair is needed for
-  authentication either; see the root-key play below for the one place that
-  wants a `.pub` file.
+  `~/.ansible/cp`, which Ansible creates itself. No key pair is needed either
+  (the one upstream play that wanted a `.pub` file is off, see below).
 - **atlas and kosmos are the exception.** Both offer GSSAPI but reject the
   ticket, then fall through to password. Runs that touch them need `-k`
   (the first play of `playbooks/slurm-cluster/slurm.yml` gathers facts from
@@ -93,15 +92,13 @@ identity for free.
 **Two upstream places that assume keys; both need a decision:**
 
 - `playbooks/slurm-cluster/slurm.yml`, second play, "Add SSH public key to
-  root user authorized keys": on a real run it puts the running admin's
-  public key (`ansible_ssh_private_key_file` + `.pub`, default
-  `~/.ssh/id_rsa.pub`) into root's `authorized_keys` on every compute node.
-  Every admin who runs the Slurm playbook gets passwordless root ssh
-  everywhere as a side effect. Harmless in `--check`. The play fails if the
-  `.pub` file does not exist, so pass
-  `-e ansible_ssh_private_key_file=$HOME/.ssh/<your key>` if you have no
-  `id_rsa`. Recommendation: guard the play with a variable defaulting to
-  off, like the bootstrap playbooks. Not changed on the branch yet.
+  root user authorized keys": upstream puts the running admin's public key
+  (default `~/.ssh/id_rsa.pub`) into root's `authorized_keys` on every
+  compute node, so every admin who runs the Slurm playbook gets passwordless
+  root ssh everywhere, and the play fails when the file does not exist.
+  **Off on this branch** (deviation 12, `slurm_add_root_ssh_key: false`).
+  Nothing needs it: no playbook logs in as root, and pam_slurm_adopt does not
+  block admins because their groups are in `/etc/localgroups`.
 - `playbooks/bootstrap/bootstrap-ssh.yml` installs the admin's key on all
   hosts so that `-k` is not needed. With Kerberos that is redundant for the
   compute nodes; keep it disabled (it is, see section 2). If atlas and kosmos
@@ -132,6 +129,8 @@ until the merge; then the old one goes. The root disk of teuwen-ansible was
 | 9 | `config/group_vars/all.yml` | rebuilt from the 26.07 `config.example` with the four site values (DNS, timezone, extra packages, `deepops_dir`) | 23.08 example with the same four values | Master's file was otherwise untouched 23.08 example text; the 26.07 example adds the driver branch and open-kernel-module knobs and updates MAAS/NGC defaults. Flip: `git checkout master -- config/group_vars/all.yml` | chunk 5b |
 | 10 | `config/group_vars/all.yml` | `users: []` | example `users:` block defining an `nvidia` sudo user with a published password hash | Nothing in the Slurm flow runs the users role and no node has that user, but a sudo account with a public hash should not sit in site config. Flip: restore the block | chunk 5b |
 | 11 | `roles/requirements.yml`, `config/group_vars/all.yml`, `config/host_vars/{alanturing,hamilton,roentgen}` | upstream `nvidia.nvidia_driver v2.3.1`; `nvidia_driver_branch: "580"` in all.yml, `"550"` in host_vars of the three older nodes | `https://github.com/NKI-AI/ansible-role-nvidia-driver` (master), which is upstream v2.3.1 code with only the default branch changed from 515 to 550 | The fork adds nothing but a default. Live drivers (2026-09-04, all Ubuntu `-server` packages, which is what the role installs): 580 on aristarchus, ptolemaeus, galileo, eudoxus, euctemon, herakles; 550 on alanturing, hamilton, roentgen. Per-host pins are the only setting under which a driver run changes no node; master's single 550 would downgrade six nodes. Flip: set one branch in all.yml and delete the host_vars lines | chunk 5b |
+
+| 12 | `playbooks/slurm-cluster/slurm.yml`, `config/group_vars/slurm-cluster.yml` | the "Add SSH public key to root user authorized keys" task runs only when `slurm_add_root_ssh_key` is true (site config: false) | upstream: unconditional (since 2020) | The play puts the running admin's `~/.ssh/id_rsa.pub` into root's `authorized_keys` on every compute node, and fails when that file does not exist. Neither is wanted here: no playbook logs in as root (Ansible connects as the admin over Kerberos and uses sudo), and the play's purpose, getting past pam_slurm_adopt, does not apply because the admin groups are in `/etc/localgroups`. Flip: set the variable to true and provide a key | chunk 7 |
 
 ### Master changes not carried over (superseded upstream)
 

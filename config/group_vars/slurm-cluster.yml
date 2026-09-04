@@ -172,6 +172,13 @@ nfs_client_group: "slurm-master[1:],slurm-node"
 # Flags for sharing slurm.conf among compute and control nodes
 slurm_conf_symlink: true
 
+# Upstream's slurm.yml installs the public key of whoever runs the playbook into
+# root's authorized_keys on every compute node. Not needed on kosmos: ssh uses
+# Kerberos and admins are in /etc/localgroups, so pam_slurm_adopt lets them in.
+# Set to true (and have a ~/.ssh/id_rsa.pub or ansible_ssh_private_key_file) to
+# get upstream behaviour.
+slurm_add_root_ssh_key: false
+
 ################################################################################
 # SOFTWARE MODULES (SM)                                                        #
 #   May be built with either EasyBuild or Spack                                #
