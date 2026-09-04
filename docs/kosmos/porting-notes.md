@@ -60,7 +60,9 @@ Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
    `slurm-cluster/nhc.yml`, `nvidia-software/nvidia-dcgm.yml`,
    `generic/rsyslog-client.yml`, `slurm-cluster/prometheus-node-exporter.yml`,
    `slurm-cluster/nvidia-dcgm-exporter.yml`. These are where the 26.07 roles
-   differ most from 23.08.
+   differ most from 23.08. Pass all playbooks to one `ansible-playbook`
+   invocation so `-K` asks once. gaia may fail at fact gathering (section 2,
+   "Fact gathering fails ..."); use herakles and eudoxus first.
 7. Only then consider a real run, playbook by playbook, starting with the
    ones that are idempotent on the current nodes (motd, nvtop, create_mounts).
 
@@ -312,6 +314,33 @@ area has several leftovers that need a decision (update or remove).
   gathered on every run instead of being cached. Harmless, but slow. Fix
   once the shared setup is decided: make the directory group-writable for the
   admin group, or point the cache at a per-user path.
+
+### Fact gathering fails on nodes with many NFS submounts (found 2026-09-04)
+
+- On gaia, `Gathering Facts` fails with `[Errno 24] Too many open files`
+  from `udevadm info ... rhea:/project-pool/network_homes/<user>`, and the
+  play stops for that host. Cause: Ansible's mount-facts collector runs one
+  `udevadm` per mount entry in a thread pool of `min(mounts, cpu_count)`
+  threads. gaia has 256 CPUs and 300+ mounts (273 NFSv4 submounts under
+  `/projects`, one per project dataset touched, plus one per user home:
+  rhea exports with crossmnt), and the ssh session's soft `nofile` limit is
+  1024. The other nodes have ~50 mounts and are fine. The count fluctuates
+  with user activity (submounts expire after `nfs_mountpoint_timeout`, 500 s,
+  when unused), which is why the same step can pass at one moment and fail
+  ten minutes later. **Not an upgrade regression:** ansible-core 2.16 in the
+  old env fails identically. Roles that need hardware facts:
+  `roles/nhc/templates/nhc.conf.j2` (`ansible_memtotal_mb`); the slurm.conf
+  template uses only the custom facts.
+- Fix options: (a) raise the soft `nofile` limit for login sessions on the
+  nodes, e.g. `/etc/security/limits.d/90-nofile.conf` with
+  `* soft nofile 65536` (hard limit is already 1048576; new ssh sessions
+  only, so let Ansible's 5-minute control sockets expire first). Nothing in
+  the repo manages limits today; this would be a small site addition.
+  (b) `gather_subset: "!hardware"` for playbooks that do not need hardware
+  facts (works, verified), not usable for nhc.yml. Prefer (a).
+- Until fixed, run `--check` tests against nodes with few mounts
+  (herakles, eudoxus, alanturing) and treat a gaia fact-gathering failure as
+  this issue, not as a playbook problem.
 
 ### Top-level playbook wiring (chunk 4e)
 
