@@ -1,0 +1,29 @@
+---
+# Render slurm.conf on the Ansible node without touching atlas or kosmos.
+#
+# With slurm_conf_symlink: true the Slurm role renders slurm.conf only on the
+# controller, into /sw/.slurm. This play gathers the custom facts (topology,
+# memory, gpus) from the compute nodes over ssh and renders the same template
+# to a local file, so it can be diffed against the shared copy before a run:
+#
+#   ansible-playbook docs/kosmos/render-slurm-conf.yml -e out=/tmp/slurm.conf.new
+#   ssh gaia cat /sw/.slurm/slurm.conf | diff -u - /tmp/slurm.conf.new
+#
+# Needs only Kerberos ssh to the compute nodes (no -k, no -K). Hardware facts
+# are skipped on purpose (see porting-notes: fact gathering fails on gaia).
+- hosts: slurm-node
+  gather_facts: yes
+  gather_subset: ['!all', '!min', 'local']
+  # role defaults first, then site group_vars, so site values win as in a real run
+  vars_files:
+    - "{{ playbook_dir }}/../../roles/slurm/defaults/main.yml"
+    - "{{ playbook_dir }}/../../config/group_vars/all.yml"
+    - "{{ playbook_dir }}/../../config/group_vars/slurm-cluster.yml"
+  tasks:
+    - name: render slurm.conf locally
+      template:
+        src: "{{ playbook_dir }}/../../roles/slurm/templates/etc/slurm/slurm.conf"
+        dest: "{{ out }}"
+      delegate_to: localhost
+      run_once: true
+      become: no
