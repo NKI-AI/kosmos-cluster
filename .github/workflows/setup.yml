@@ -20,6 +20,6 @@ jobs:
 
       - name: verify ansible in venv
         run: |
-          source /opt/deepops/env/bin/activate
+          source /opt/kosmos-cluster/env/bin/activate
           ansible --version
           python3 -c "from packaging.version import Version; print('packaging OK')"
