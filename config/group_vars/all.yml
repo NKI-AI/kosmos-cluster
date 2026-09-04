@@ -1,0 +1,322 @@
+################################################################################
+# DeepOps Ansible Config                                                       #
+################################################################################
+#
+# Configuration common to all hosts
+# Define per-group or per-host values in the other configuration files
+#
+
+################################################################################
+# PROXY
+################################################################################
+# Proxy Variables needed for scripts, ansible, etc.
+# http_proxy: http://10.0.2.5:3128
+# https_proxy: http://10.0.2.5:3128
+# no_proxy: localhost,cluster.local,127.0.0.1,::1,10.0.2.10,10.0.2.20,10.0.2.30
+
+# proxy_env:
+      # http_proxy: '{{ http_proxy }}'
+      # https_proxy: '{{ https_proxy }}'
+      # no_proxy: '{{ no_proxy }}'
+
+
+################################################################################
+# NETWORK                                                                      #
+################################################################################
+# DNS config
+# Playbook: dns-config
+dns_config_servers: [127.0.0.53]
+dns_config_search: [rhpc.nki.nl]
+
+# NTP configuration
+# Playbook: chrony-client
+chrony_install: true
+chrony_service_state: "started"
+chrony_service_enabled: "yes"
+chrony_timezone: "Europe/Amsterdam"
+chrony_config_server:
+  - 0.pool.ntp.org
+  - 1.pool.ntp.org
+  - 2.pool.ntp.org
+  - 3.pool.ntp.org
+
+# Set hostname based on inventory file
+deepops_set_hostname: true
+
+################################################################################
+# SOFTWARE                                                                     #
+################################################################################
+# Extra software to install or remove
+# Playbook: software
+software_extra_packages:
+  - curl
+  - git
+  - rsync
+  - screen
+  - tmux
+  - vim
+  - wget
+  - build-essential
+  - linux-tools-generic
+  - zsh
+  - ncdu
+  - nfs-common
+  - dcmtk
+#  - "{{ 'linux-headers-' + ansible_kernel }}"
+#software_remove_packages:
+#  - popularity-contest
+
+
+################################################################################
+# STORAGE                                                                      #
+################################################################################
+# AutoFS configuration
+# Playbook: authentication
+#autofs_mount: "/home"
+#autofs_map: "auto.home_linux"
+
+# NFS Server
+# This config will create an NFS server and share the given exports
+# Playbook: nfs-server.yml
+#nfs_exports:
+#  - path: /export/shared
+#    options: "*(rw,sync,no_root_squash)"
+
+# NFS Client
+# This config will mount an NFS share on hosts
+# Playbook: nfs-client.yml
+#nfs_mounts:
+#  - mountpoint: /mnt/shared
+#    server: '{{ groups["slurm-master"][0] }}'
+#    path: /export/shared
+#    options: async,vers=3
+
+# Extra Packages for Enterprise Linux (RHEL/CentOS)
+epel_package: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm"
+
+################################################################################
+# USERS                                                                        #
+################################################################################
+# User management
+# Playbook: users, user-password
+# create user `nvidia` with password `deepops` on all nodes
+# kosmos: the example's built-in "nvidia" sudo user (published password hash)
+# is deliberately not defined. Accounts are managed outside DeepOps.
+users: []
+
+
+################################################################################
+# SSH HARDENING                                                                #
+#   devsec.hardening role called from users playbook                           #
+################################################################################
+
+ssh_client_hardening: false
+ssh_server_password_login: true
+ssh_use_pam: true
+ssh_max_auth_retries: 10
+sftp_enabled: true
+sftp_chroot: false
+
+################################################################################
+# NVIDIA                                                                       #
+################################################################################
+# NVIDIA GPU configuration
+# Playbook: nvidia-cuda
+# Install latest version by default,
+# if you want a specific version, use i.e. cuda-toolkit=12.2.0-1
+# cuda_version: cuda-toolkit
+
+# DGX-specific vars may be used to target specific models,
+# because available versions for DGX may differ from the generic repo
+#cuda_dgx_1_version: "{{ cuda_version }}"
+#cuda_dgx_2_version: "{{ cuda_version }}"
+#cuda_dgx_a100_version: "{{ cuda_version }}"
+
+# Playbook: nvidia-set-gpu-clocks
+# Resets the Gpu clocks to the default values. (see the `--reset-gpu-clocks` flag in nvidia-smi for more)
+gpu_clock_reset: no
+# Specifies <minGpuClock,maxGpuClock> clocks as a pair (e.g. 1500,1500) that defines the range of desired locked GPU clock speed in MHz. Setting this will supersede application clocks and take effect regardless if an app is running. Input can also be a singular desired clock value. (see the `--lock-gpu-clocks` flag in nvidia-smi for more)
+gpu_clock_lock: "1507,1507"
+
+# Debugging var: force install NVIDIA driver even if GPU not detected
+nvidia_driver_force_install: false
+# Default NVIDIA driver branch for generic host driver installs.
+# kosmos: 580 matches the A6000/A100/H100 nodes; alanturing, hamilton and
+# roentgen pin 550 in config/host_vars (see docs/kosmos/porting-notes.md).
+nvidia_driver_branch: "580"
+# Set true on Ubuntu systems that require NVIDIA open kernel modules.
+nvidia_driver_ubuntu_use_open_kernel_modules: false
+
+
+################################################################################
+# CONTAINER RUNTIME                                                            #
+################################################################################
+# Docker configuration
+# Playbook: docker, nvidia-docker, k8s_cluster
+#
+# For supported Docker versions, see: submodules/kubespray/roles/container-engine/docker/vars/*
+docker_install: yes
+# docker_version: 'latest'
+docker_dns_servers_strict: no
+docker_storage_options: -s overlay2
+#docker_options: "--bip=192.168.99.1/24"
+# Enable docker iptables
+# If this isn't set, containers won't have access to the outside net
+# See https://github.com/kubernetes-sigs/kubespray/issues/2002
+docker_iptables_enabled: true
+# Docker daemon logins
+#   Note: example only! you should put these in an Ansible Vault file for security!
+#
+#docker_login_registries:
+#- registry: docker.io
+#  username: myuser
+#  password: mypassword
+#  email: docker@docker.io
+#- registry: nvcr.io
+#  username: '$oauthtoken'
+#  password: mypassword
+
+# Enroot configuration
+# Playbook: slurm, slurm-cluster
+#
+# See: https://github.com/NVIDIA/pyxis/wiki/Setup#enroot-configuration-example
+enroot_runtime_path: '/run/enroot/user-$(id -u)'
+enroot_cache_path: '/var/lib/enroot-cache/user-$(id -u)'
+enroot_data_path: '/tmp/enroot-data/user-$(id -u)'
+enroot_config: |
+  ENROOT_CONFIG_PATH ${HOME}/.config/enroot
+  ENROOT_SQUASH_OPTIONS -noI -noD -noF -noX -no-duplicates
+  ENROOT_MOUNT_HOME y
+  ENROOT_RESTRICT_DEV y
+  ENROOT_ROOTFS_WRITABLE y
+  ENROOT_RUNTIME_PATH {{ enroot_runtime_path }}
+  ENROOT_CACHE_PATH {{ enroot_cache_path }}
+  ENROOT_DATA_PATH {{ enroot_data_path }}
+enroot_environ_config_files: []
+enroot_environ_config_files_dgx:
+  - filename: 50-mellanox.env
+    content: |
+      MELLANOX_VISIBLE_DEVICES=all
+  - filename: 50-mpi.env
+    content: |
+      OMPI_MCA_btl_tcp_if_exclude=lo,docker0,ib0,ib1,ib2,ib3
+
+# Singularity configuration
+# Playbook: singularity, slurm-cluster
+# Singularity target version
+# set an alternate singularity version here;
+# see roles/singularity_wrapper/defaults/main.yml for default
+# singularity_version:
+singularity_conf_path: "/etc/singularity/singularity.conf"
+bind_paths: []
+  # example:
+  #- /mnt/shared
+golang_install_dir: '/opt/go/{{ golang_version }}'
+golang_gopath: /opt/go/packages
+
+################################################################################
+# AUTH                                                                         #
+################################################################################
+# NIS configuration
+# Playbook: authentication
+#nis_domain: example.com
+#nis_server: 10.0.0.1
+
+# Kerberos configuration
+# Playbook: authentication
+#kerberos_client_realm_name: "example.com"
+#kerberos_client_kdc_hostname: "kerberos"
+#kerberos_client_admin_hostname: "kerberos"
+#nfs_idmapd_domain: example.com
+
+
+################################################################################
+# MONITORING                                                                   #
+################################################################################
+# Collectd
+# Playbook: collectd
+#collectd_network_server: "deepops-mgmt.example.com"
+#collectd_network_port: "30300"
+#collectd_python_module_path: "/usr/lib/collectd/dcgm"
+#collectd_python_modules: []
+#collectd_config_dir: "/etc/collectd/collectd.conf.d"
+#with_dcgm_collectd: false
+
+
+################################################################################
+# MAAS                                                                         #
+################################################################################
+# MAAS (Metal as a Service): Node provisioning/PXE service
+# Playbook: maas, maas_management
+maas_adminusers:
+  - username: 'admin'
+    email: 'admin@{{ maas_dns_domain }}'
+    password: 'admin'
+maas_dns_domain: 'deepops.local'
+maas_region_controller: '192.168.1.1'
+maas_region_controller_url: 'http://{{ maas_region_controller }}:5240/MAAS'
+# MAAS 3.7 is the current Ubuntu 24.04 line. Keep the 3.5 PPA when the MAAS
+# controller itself still runs Ubuntu 22.04.
+maas_repo: "{{ 'ppa:maas/3.7' if ansible_distribution_version is version('24.04', '>=') else 'ppa:maas/3.5' }}"
+
+# Defines if maas user should generate ssh keys
+# Usable for remote KVM/libvirt power actions
+maas_setup_user: false
+
+maas_single_node_install: true
+
+maas_kvm_management: false
+
+# Avoid installing python-libmaas via pip: it shadows the packaged MAAS CLI
+# with /usr/local/bin/maas, which breaks DeepOps' MAAS operational workflow.
+maas_python_reqs:
+  - jinja2
+  - oauth
+  - pyyaml
+
+################################################################################
+# NVIDIA Datacenter GPU Manager                                                #
+################################################################################
+install_dcgm: true
+
+################################################################################
+# Misc.                                                                        #
+################################################################################
+# Set /etc/rc.local contents
+# Playbook: rc-local
+# rc_local_contents: |
+#   echo foo
+#   echo bar
+#
+# DeepOps specific config
+deepops_dir: /opt/kosmos-cluster
+# Directory for python virtualenv
+# Roles: K8s GPU operator, GPU plugin, OpenShift/K8s
+deepops_venv: '{{ deepops_dir }}/venv'
+
+# Disable cloud-init
+deepops_disable_cloud_init: true
+
+# Default profile when using NVIDIA MIG Manager: https://github.com/NVIDIA/mig-parted
+mig_manager_profile: all-disabled
+mig_manager_config: /etc/nvidia-mig-manager/config.yml
+mig_manager_hooks: /etc/nvidia-mig-manager/hooks.yaml
+
+################################################################################
+# Container registry                                                           #
+################################################################################
+standalone_container_registry_cache_enable: true
+standalone_container_registry_port: "5000"
+
+# To configure some set of hosts as insecure registries, list them here.
+# Slurm and K8s cluster playbooks will automatically use the master nodes for
+# these if not specified.
+#docker_insecure_registries: ["<host>:<port>"]
+#docker_registry_mirrors: ["http://<host>:<port>"]
+
+################################################################################
+# Configuration for NGC-Ready playbook                                         #
+################################################################################
+ngc_ready_cuda_container: "nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04"
+ngc_ready_pytorch: "nvcr.io/nvidia/pytorch:26.04-py3"
+ngc_ready_tensorflow: "nvcr.io/nvidia/tensorflow:25.02-tf2-py3"

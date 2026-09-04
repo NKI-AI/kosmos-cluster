@@ -22,11 +22,18 @@ not applied; they go into section 2.
 | 0a | `ansible.cfg` | `pipelining = True` (upstream) | `pipelining = False` (EricMarcus-ai, 2024-06-03, "Disable ansible pipelining", no reason given) | Pipelining halves the SSH round-trips per task. It only fails when sudo enforces `requiretty`, which the nodes do not (checked on gaia). Flip: set `pipelining = False` | (not applied, branch keeps upstream) |
 | 0b | `ansible.cfg` | no `[galaxy]` section (upstream) | `[galaxy] server = https://old-galaxy.ansible.com/` (Musab, 2023-11-02) | Temporary workaround from the late-2023 Galaxy migration; the host no longer serves content and 26.07 requirements resolve on galaxy.ansible.com. Flip: re-add the section | (not applied, branch keeps upstream) |
 | 1 | `scripts/setup.sh` | venv default `/opt/kosmos-cluster/env` | venv in `./env` (upstream default) | Shared checkout and venv on teuwen-ansible, one environment for all admins | b084b7f1 |
-| 2 | `roles/slurm/defaults/main.yml` | untouched upstream file | overrides `deepops_dir`, `slurm_build_dir`, `hwloc_build_dir`, `pmix_build_dir`, `hwloc_install_prefix`, `pmix_install_prefix` to `/opt/kosmos-cluster/...` and `slurm_cluster_name: kosmos` | Site values belong in `config/group_vars`, not in a vendored role; same values will be set there (site config chunk) | c9d86ffc |
+| 2 | `roles/{slurm,nhc,nvidia-dcgm-exporter,nginx-docker-registry-cache,standalone-container-registry,pyxis}/defaults/main.yml` | untouched upstream files | overrides build/config paths to `/opt/kosmos-cluster/...`, `slurm_cluster_name: kosmos`, `standalone_container_registry_name: kosmos-registry`, `slurm_pyxis_version: 0.19.0` | Site values belong in `config/group_vars`, not in vendored roles. All of them are now set in `config/group_vars/{all,slurm-cluster}.yml`, derived from `deepops_dir` | c9d86ffc, chunk 5b |
 | 3 | `roles/slurm/templates/etc/slurm/slurm.conf` | `KillWait=120` (upstream 26.07 value) | `KillWait=30` | 30 was the 23.08 default, not a site choice. Upstream raised it in Sept 2024 for more graceful job termination. Behavior change: jobs get 120 s instead of 30 s between SIGTERM and SIGKILL. Flip: set `KillWait=30` in the template | c9d86ffc |
 | 4 | `playbooks/slurm-cluster/slurm.yml` | keeps `roles: [facts]` in the first play, in addition to the fact-gathering pre_task | removed the role, keeps only the pre_task | The role installs the custom fact scripts (`topology`, `memory`, `gpus`) that slurm.conf needs. Master relies on other playbooks having installed them. On existing nodes the role is a no-op (scripts unchanged since 23.08). Flip: delete the `roles:` block | 00ae45d2 |
 
 | 5 | `roles/spack.environment`, `playbooks/slurm-cluster/spack-modules.yml`, `roles/spack/defaults/main.yml` | untouched upstream (no spack.environment role, upstream spack-modules.yml, upstream spack pin v1.2.0) | adds a role that installs Spack profile scripts on all hosts plus zsh support, a play for it in spack-modules.yml, and pins spack v0.20.2 with gcc/gfortran deps (EricMarcus-ai and joren, June 2024) | Spack was never rolled out: `/sw` (shared NFS) has no spack directory, no node has `/etc/profile.d/z00_spack.*`, `spack` is not on the path, and `slurm_install_spack` is `false` in config so the play never runs. Confirmed with the admin that nobody uses Spack. Flip: `git checkout master -- roles/spack.environment playbooks/slurm-cluster/spack-modules.yml` and set `spack_version`/`spack_ubuntu_deps` in group_vars (upstream already has gcc/gfortran) | (not applied, chunk 4d) |
+
+| 6 | `config/group_vars/slurm-cluster.yml` | `slurm_cluster_install_singularity: no` | `yes` | Apptainer replaced Singularity on the nodes (chunk 4c) and upstream's singularity playbook is broken in 26.07 (`abims_sbr.singularity` dropped from requirements). Flip: set `yes` (and expect the playbook to fail) | chunk 5b |
+| 7 | `config/group_vars/slurm-cluster.yml` | `slurm_version: "23.02.4"` pinned | no pin in config (master pinned it in `roles/slurm/defaults`) | Upstream 26.07 defaults to 26.05.1. Slurm supports upgrading at most two major versions at once, so 23.02 -> 26.05 must be stepped; a Slurm upgrade is a separate project. Flip: remove the pin | chunk 5b |
+| 8 | `config/group_vars/slurm-cluster.yml` | `slurm_default_group`, `slurm_organization_name`, `slurm_install_spack` removed | defines them | No role or playbook on either branch reads the first two; the third follows from deviation 5. Flip: re-add the lines | chunk 5b |
+| 9 | `config/group_vars/all.yml` | rebuilt from the 26.07 `config.example` with the four site values (DNS, timezone, extra packages, `deepops_dir`) | 23.08 example with the same four values | Master's file was otherwise untouched 23.08 example text; the 26.07 example adds the driver branch and open-kernel-module knobs and updates MAAS/NGC defaults. Flip: `git checkout master -- config/group_vars/all.yml` | chunk 5b |
+| 10 | `config/group_vars/all.yml` | `users: []` | example `users:` block defining an `nvidia` sudo user with a published password hash | Nothing in the Slurm flow runs the users role and no node has that user, but a sudo account with a public hash should not sit in site config. Flip: restore the block | chunk 5b |
+| 11 | `roles/requirements.yml`, `config/group_vars/all.yml`, `config/host_vars/{alanturing,hamilton,roentgen}` | upstream `nvidia.nvidia_driver v2.3.1`; `nvidia_driver_branch: "580"` in all.yml, `"550"` in host_vars of the three older nodes | `https://github.com/NKI-AI/ansible-role-nvidia-driver` (master), which is upstream v2.3.1 code with only the default branch changed from 515 to 550 | The fork adds nothing but a default. Live drivers (2026-09-04, all Ubuntu `-server` packages, which is what the role installs): 580 on aristarchus, ptolemaeus, galileo, eudoxus, euctemon, herakles; 550 on alanturing, hamilton, roentgen. Per-host pins are the only setting under which a driver run changes no node; master's single 550 would downgrade six nodes. Flip: set one branch in all.yml and delete the host_vars lines | chunk 5b |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -48,6 +55,14 @@ same fix or removed the code in question.
   to `false`, so the line is left as upstream has it. Same effect.
 - `playbooks/slurm-cluster.yml`: master adds `spack-modules.yml` guarded by
   `slurm_install_spack`. Not added, follows from deviation 5.
+- `.gitmodules` / `submodules/`: master removed `packer-maas` and bumped
+  kubespray; 26.07 carries its own submodule set (kubespray 2.31).
+- `config/nvidia-mig-config.yml`: master deleted the `all-7g.80gb` profile
+  from the example. Taken from the 26.07 example as is; `mig_manager_profile`
+  is `all-disabled` so no profile is applied.
+- Deleted upstream directories (k8s, DGX, PXE, virtual, ~8000 lines) are not
+  deleted on this branch. Keeping the tree identical to the tag makes future
+  upgrades a clean rebase.
 
 ### Behavior differences vs the running cluster
 
@@ -55,6 +70,14 @@ Changes the upgrade brings that we accept rather than pin back. Also listed
 in the table above where a flip is possible.
 
 - `KillWait` 30 -> 120 (see deviation 3).
+- `nvidia-dcgm-exporter` container image: `2.1.8-2.4.0-rc.2-ubuntu20.04` ->
+  `4.5.3-4.8.2-distroless` (role default; monitoring is enabled).
+- `standalone-container-registry` image `registry:2.8` -> `3.1.1` and
+  nginx cache proxy `0.6.4` -> `0.6.5`: both features are off in site config.
+- Galaxy roles/collections move to the 26.07 pins (`ansible.posix`,
+  `community.general`, `community.docker`, `devsec.hardening` replaces the
+  old `dev-sec` roles). Run `scripts/setup.sh` or `ansible-galaxy install`
+  against the new requirements before the first run.
 
 ## 2. Things to address after the port
 
@@ -186,3 +209,25 @@ area has several leftovers that need a decision (update or remove).
   MAAS credentials it returns an empty inventory and exits 0, so it is inert
   here. Left as upstream ships it; the static `config/inventory` remains the
   source of truth.
+
+### Site config (chunk 5b)
+
+- **herakles was not provisioned by the playbooks.** Unlike gaia, eudoxus and
+  alanturing it has no NHC, no DCGM, no docker-ce, no exporters, and has
+  `podman-docker` installed. Site config enables NHC, DCGM, monitoring and
+  rsyslog for all nodes, so a full run against herakles would try to install
+  docker-ce next to podman-docker (conflicting `docker` command) and deploy
+  everything the other nodes have. Decide first whether herakles should be
+  brought in line or excluded (host_vars: `install_dcgm: false`,
+  `slurm_install_nhc: no`, ...).
+- eudoxus has `docker.dcgm-exporter.service` and `docker.node-exporter.service`
+  present but inactive; alanturing and gaia have them running.
+- `slurm_password` / `slurm_db_password` are still the upstream placeholder
+  strings, on master and here. They should live in an Ansible vault.
+- `slurm_install_nhc: yes` with the default NHC config; the comment in the
+  example recommends a site `nhc_config_template`.
+- `slurm_enable_monitoring: true` but `[slurm-metric]` is empty (kosmos is
+  commented out), so Prometheus/Grafana/Alertmanager have no target host and
+  only the node/dcgm exporters get deployed.
+- `spack_default_packages:` is left as an empty key (as on master); harmless
+  while Spack is off.

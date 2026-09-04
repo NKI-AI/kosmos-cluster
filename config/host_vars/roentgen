@@ -1,3 +1,5 @@
 ---
 slurm_partition_name: rtx8000
 slurm_def_mem_per_cpu: 7000
+# kosmos: this node runs the 550 driver branch (see docs/kosmos/porting-notes.md)
+nvidia_driver_branch: "550"
