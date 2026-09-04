@@ -4,11 +4,14 @@
 - name: Install python required for Ansible
   import_playbook: bootstrap/bootstrap-python.yml
 
-- name: Set up SSH keys if needed
-  import_playbook: bootstrap/bootstrap-ssh.yml
-
-- name: Set up passwordless sudo if needed
-  import_playbook: bootstrap/bootstrap-sudo.yml
+# kosmos: bootstrap ssh/sudo disabled (as on master). Admins run with -K;
+# see docs/kosmos/porting-notes.md. Run playbooks/bootstrap/*.yml by hand
+# for a new node if needed.
+# - name: Set up SSH keys if needed
+#   import_playbook: bootstrap/bootstrap-ssh.yml
+#
+# - name: Set up passwordless sudo if needed
+#   import_playbook: bootstrap/bootstrap-sudo.yml
 
 - name: Disable cloud-init
   import_playbook: generic/disable-cloud-init.yml
@@ -62,6 +65,9 @@
     hostlist: "{{ nfs_server_group | default('slurm-nfs[0]') }}"
   when: slurm_enable_nfs_server
 
+- name: Set up NFS filesystem | Install nfs-common on all hosts (kosmos)
+  import_playbook: generic/nfs-general.yml
+
 - name: Set up NFS filesystem | Install nfs-client
   import_playbook: generic/nfs-client.yml
   vars:
@@ -76,6 +82,9 @@
   import_playbook: slurm-cluster/nhc.yml hostlist=slurm-node
   when: slurm_install_nhc|default(false)
 
+- name: Create software/data mounts (kosmos)
+  import_playbook: slurm-cluster/create_mounts.yml
+
 - name: Install Slurm
   import_playbook: slurm-cluster/slurm.yml
 
@@ -86,6 +95,12 @@
 - name: Install Lmod
   import_playbook: slurm-cluster/lmod.yml
   when: slurm_install_lmod
+
+- name: Update motd (kosmos)
+  import_playbook: slurm-cluster/motd.yml
+
+- name: Install nvtop (kosmos)
+  import_playbook: slurm-cluster/nvtop.yml
 
 - name: Install the NVIDIA HPC SDK
   import_playbook: nvidia-software/nvidia-hpc-sdk.yml

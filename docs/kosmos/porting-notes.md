@@ -39,6 +39,15 @@ same fix or removed the code in question.
   current Ansible.
 - RHEL 7 `yum` tasks in the slurm role, old molecule images, older
   `50-exclusive-gpu` epilog: master is simply older than 26.07 here.
+- `playbooks/container/docker.yml`: master fixed the kubespray-defaults path
+  (`kubespray-defaults/defaults/main/main.yml`); 26.07 ships its own fix for
+  the newer kubespray (`kubespray_defaults/...`, underscore). Master's path
+  does not exist in the kubespray version the branch carries.
+- `playbooks/slurm-cluster.yml`: master commented out the nfs-server line.
+  Upstream guards it with `slurm_enable_nfs_server`, which site config sets
+  to `false`, so the line is left as upstream has it. Same effect.
+- `playbooks/slurm-cluster.yml`: master adds `spack-modules.yml` guarded by
+  `slurm_install_spack`. Not added, follows from deviation 5.
 
 ### Behavior differences vs the running cluster
 
@@ -133,3 +142,18 @@ area has several leftovers that need a decision (update or remove).
   profile scripts only on the host that clones Spack (`slurm-master[0]`),
   while the install lives on shared NFS. Master's all-hosts play and zsh
   template (see deviation 5) would still be needed.
+
+### Top-level playbook wiring (chunk 4e)
+
+- `bootstrap-ssh.yml` and `bootstrap-sudo.yml` are disabled by commenting
+  them out in `playbooks/slurm-cluster.yml`, as on master (joren, 2024-06-05,
+  no reason given; the effect is that admins keep typing their password with
+  `-K`, and nobody gets `NOPASSWD` sudo on all nodes as a side effect of a
+  playbook run). Keeping sudo password-protected is sensible for a shared
+  cluster. **Revisit after the port, during `--check` testing:** re-enabling
+  only `bootstrap-ssh.yml` (key-based ssh for the admin running Ansible)
+  would remove the `-k` / ssh friction while keeping the sudo policy. A
+  variable guard defaulting to off would also be cleaner than commented lines.
+- `playbooks/slurm-cluster/mount_scratch_disks.yml` and
+  `playbooks/container/apptainer.yml` are not in the top-level playbook on
+  master either; they only run when someone runs them by hand.
