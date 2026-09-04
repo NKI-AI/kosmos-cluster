@@ -13,7 +13,7 @@ point: DeepOps 23.08, commit d248b658). This file has two sections:
 
 Rule used while porting: port `master` as is. Deviate only with a stated
 reason, and record it here. Design changes that nobody has asked for are
-shelved (listed at the end), not applied.
+not applied; they go into section 2.
 
 ## 1. Conscious deviations from master
 
@@ -27,6 +27,7 @@ shelved (listed at the end), not applied.
 | 4 | `playbooks/slurm-cluster/slurm.yml` | keeps `roles: [facts]` in the first play, in addition to the fact-gathering pre_task | removed the role, keeps only the pre_task | The role installs the custom fact scripts (`topology`, `memory`, `gpus`) that slurm.conf needs. Master relies on other playbooks having installed them. On existing nodes the role is a no-op (scripts unchanged since 23.08). Flip: delete the `roles:` block | 00ae45d2 |
 
 ### Master changes not carried over (superseded upstream)
+
 These master changes were not carried over because 26.07 already contains the
 same fix or removed the code in question.
 
@@ -73,3 +74,20 @@ admins.
 - `playbooks/generic/nfs-general.yml` exists only to install `nfs-common`;
   upstream's `nfs-client.yml` would do the same if
   `slurm_enable_nfs_client_nodes` were on, but that also expects `nfs_mounts`.
+
+### nvtop and motd (chunk 4b)
+
+- `roles/nvtop` clones the Syllo/nvtop GitHub repository with `update: yes`
+  and builds whatever HEAD is that day. Nodes can end up on different
+  versions, and the cmake / make install tasks report "changed" on every run.
+  Pinning a tag (gaia currently runs 3.1.0) would fix both. Reason the role
+  exists: Ubuntu 22.04's packaged nvtop is 1.2.2, too old for current GPUs.
+- `playbooks/slurm-cluster/nvtop.yml` sets a `has_gpus` fact from the custom
+  `gpus` fact, but the nvtop role never reads it, so nvtop is also built on
+  CPU-only nodes such as gaia.
+- `roles/motd` installs its own copy of Ubuntu's `50-landscape-sysinfo`. On
+  gaia that file is now a symlink to `/usr/share/landscape/landscape-sysinfo.wrapper`
+  (dated 2026-01-05), so a package update replaced the role's file after the
+  last motd run. The role would put its copy back on the next run.
+- `roles/motd/templates/00-header.yml.j2` calls `tput` unconditionally and
+  prints warnings when `TERM` is unset (non-interactive use). Cosmetic.
