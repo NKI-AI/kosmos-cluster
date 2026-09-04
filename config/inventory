@@ -1,0 +1,116 @@
+#
+# Server Inventory File
+#
+# Uncomment and change the IP addresses in this file to match your environment
+# Define per-group or per-host configuration in group_vars/*.yml
+
+######
+# ALL NODES
+# NOTE: Use existing hostnames here, DeepOps will configure server hostnames to match these values
+######
+
+[all]
+# A6000 nodes
+aristarchus         ansible_host=aristarchus
+ptolemaeus          ansible_host=ptolemaeus
+galileo             ansible_host=galileo
+
+# A100 nodes
+eudoxus             ansible_host=eudoxus
+euctemon            ansible_host=euctemon
+
+# H100 nodes
+herakles            ansible_host=herakles
+
+# CPU nodes
+gaia                ansible_host=gaia
+
+# RTX2080Ti small nodes
+# plato             ansible_host=plato               Phased out
+# schrodinger       ansible_host=schrodinger         Phased out
+# carlos            ansible_host=carlos.rhpc.nki.nl       Phased out 
+
+# RTX2080Ti large node
+alanturing          ansible_host=alanturing
+hamilton            ansible_host=hamilton
+
+# RTX8000 nodes
+roentgen            ansible_host=roentgen
+
+# P6000 node
+# mariecurie        ansible_host=mariecurie          Phased out
+
+# VMs/controller
+atlas               ansible_host=atlas
+
+# Storage
+# rhea              ansible_host=rhea
+# kronos            ansible_host=kronos
+
+# Outside slurm cluster
+# [outside]
+# gorgophone
+
+[scratch-node]
+euctemon
+eudoxus
+ptolemaeus
+galileo
+aristarchus
+alanturing
+herakles
+hamilton
+# mariecurie                                                Phased out
+# roentgen  
+# plato
+# schrodinger
+# carlos
+
+
+[mount-scratch]
+gaia
+
+
+######
+# SLURM
+######
+[slurm-master]
+atlas
+
+[slurm-login]
+kosmos
+# 
+[slurm-metric]
+# kosmos
+
+[slurm-node]
+aristarchus
+ptolemaeus
+galileo
+# carlos
+euctemon
+eudoxus
+# plato
+# schrodinger
+alanturing
+roentgen
+# mariecurie
+hamilton
+gaia
+herakles
+
+[slurm-cluster:children]
+slurm-master
+slurm-node
+slurm-login
+
+######
+# SSH connection configuration
+######
+[all:vars]
+# SSH User
+#ansible_user=ubuntu
+#ansible_ssh_private_key_file='~/.ssh/id_rsa'
+# SSH bastion/jumpbox
+#ansible_ssh_common_args='-o ProxyCommand="ssh -W %h:%p -q ubuntu@10.0.0.1"'
+

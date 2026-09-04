@@ -157,3 +157,32 @@ area has several leftovers that need a decision (update or remove).
 - `playbooks/slurm-cluster/mount_scratch_disks.yml` and
   `playbooks/container/apptainer.yml` are not in the top-level playbook on
   master either; they only run when someone runs them by hand.
+
+### Inventory and host_vars (chunk 5a)
+
+- **Urgent, pre-existing on master: no default partition after the
+  phase-out.** `partition_settings` marks `rtx2080ti_sm` as the default
+  partition, but since e812a659 (2026-09-03) no active node in the
+  inventory belongs to it (plato, schrodinger, carlos are commented out).
+  The slurm.conf template only emits partitions that have nodes, so the next
+  render, on either branch, produces a slurm.conf with no `Default=YES`
+  partition and jobs submitted without `-p` are rejected. The live config on
+  gaia still has the old 17-node layout. Pick a new default partition in
+  `config/group_vars/slurm-cluster.yml` before running the Slurm playbook.
+- `slurm_def_mem_per_cpu` and `slurm_max_job_timelimit` in
+  `config/host_vars/*` are dead: the slurm.conf template reads both only
+  from `partition_settings[<partition>]`. gaia (1900 vs 1000), galileo
+  (3800 vs 7000, 20160 vs 10080), ptolemaeus (20160 vs 10080) and hamilton
+  (6000 vs 5700) differ from their partition, so someone intended per-host
+  overrides that never took effect. Either drop the host values or make the
+  template honour them.
+- `config/host_vars/{carlos,mariecurie,plato,schrodinger}` (with their
+  `gpu_topology` overrides) describe phased-out nodes; remove once the nodes
+  are gone for good.
+- `kosmos` appears only in `[slurm-login]`, not under `[all]`. Works, but
+  inconsistent with the other hosts.
+- Upstream 26.07 adds `scripts/maas_inventory.py` to the inventory path in
+  `ansible.cfg` (dynamic inventory from a Canonical MAAS server). Without
+  MAAS credentials it returns an empty inventory and exits 0, so it is inert
+  here. Left as upstream ships it; the static `config/inventory` remains the
+  source of truth.
