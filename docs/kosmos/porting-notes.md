@@ -5,6 +5,8 @@ small set of overlay commits**. The overlay ports what is on `master` (fork
 point: DeepOps 23.08, commit d248b658). Contents:
 
 - **Before the first run**: the test recipe.
+- **Running playbooks from teuwen-ansible**: how ssh authentication works
+  (Kerberos, not keys), which hosts are the exception, ticket expiry.
 - **1. Conscious deviations from master**: every place where the branch
   deliberately differs from `master`, why, and the commit. Other admins can
   review each row and flip it back if they disagree.
@@ -15,7 +17,7 @@ Rule used while porting: port `master` as is. Deviate only with a stated
 reason, and record it here. Design changes that nobody has asked for are
 not applied; they go into section 2.
 
-**Status (2026-09-04):** port complete, untested. Everything on `master` up
+**Status (2026-09-04):** port complete; env-26.07 built, syntax checks pass, `--check` runs starting. Everything on `master` up
 to e812a659 has been ported, dropped with a row below, or superseded upstream.
 
 ## Before the first run
@@ -45,6 +47,68 @@ Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
    on gaia. Expected differences: `KillWait`, the phased-out nodes disappearing.
 7. Only then consider a real run, playbook by playbook, starting with the
    ones that are idempotent on the current nodes (motd, nvtop, create_mounts).
+
+## Running playbooks from teuwen-ansible
+
+Checked on 2026-09-04 from kosmas-ans's account; other admins should see the
+same, but verify with `klist` and `ssh -v <node> true` if in doubt.
+
+**ssh to the nodes uses Kerberos, not keys.** teuwen-ansible and the nodes
+are joined to the `RHPC.NKI.NL` realm (sssd). Logging in gives you a ticket
+(`klist`), and ssh authenticates with it over GSSAPI (`ssh -v gaia true`
+shows `Authenticated to gaia using "gssapi-with-mic"`). Ansible runs the
+same ssh, so it connects the same way: an ad-hoc `ansible gaia,herakles -m
+ping` succeeds with no key file and no `-k`. Nobody needs to generate or
+distribute ssh keys for the compute nodes, and every admin keeps their own
+identity for free.
+
+- **Tickets expire after about a day** (see the `krbtgt` line in `klist`).
+  Interactive ssh then silently falls back to a password prompt; Ansible
+  cannot answer one and fails with "Permission denied (publickey,gssapi...)"
+  on every host. Run `kinit` and retry.
+- **`~/.ssh` must exist on teuwen-ansible.** `ansible.cfg` puts the ssh
+  control sockets in `~/.ssh/ansible-...`. Home directories on
+  teuwen-ansible are local (not the NFS home the nodes share), and a fresh
+  account has no `~/.ssh`. Plain ssh does not need the directory, Ansible
+  does. `mkdir -m 700 ~/.ssh` once. (Likely cause of the "ssh works but the
+  playbook cannot connect" seen on 2026-09-03: the directory did not exist
+  until an `ssh-keygen` created it as a side effect. Not confirmed from the
+  error text.)
+- **atlas and kosmos are the exception.** Both offer GSSAPI but reject the
+  ticket, then fall through to password. Runs that touch them need `-k`
+  (the first play of `playbooks/slurm-cluster/slurm.yml` gathers facts from
+  every inventory host, so `-k` is needed there even with `--limit gaia`),
+  or a key in your `authorized_keys` on those two hosts. Why the controller
+  and login node behave differently from the compute nodes is an open
+  question for the admins.
+- **Sudo on the nodes needs a password**: always `-K`. Same password as for
+  `-k`.
+- Node home directories are NFS from rhea, shared by all nodes; an
+  `authorized_keys` entry made on one node applies to all of them. Your home
+  on teuwen-ansible is separate.
+
+**Two upstream places that assume keys; both need a decision:**
+
+- `playbooks/slurm-cluster/slurm.yml`, second play, "Add SSH public key to
+  root user authorized keys": on a real run it puts the running admin's
+  public key (`ansible_ssh_private_key_file` + `.pub`, default
+  `~/.ssh/id_rsa.pub`) into root's `authorized_keys` on every compute node.
+  Every admin who runs the Slurm playbook gets passwordless root ssh
+  everywhere as a side effect. Harmless in `--check`. The play fails if the
+  `.pub` file does not exist, so pass
+  `-e ansible_ssh_private_key_file=$HOME/.ssh/<your key>` if you have no
+  `id_rsa`. Recommendation: guard the play with a variable defaulting to
+  off, like the bootstrap playbooks. Not changed on the branch yet.
+- `playbooks/bootstrap/bootstrap-ssh.yml` installs the admin's key on all
+  hosts so that `-k` is not needed. With Kerberos that is redundant for the
+  compute nodes; keep it disabled (it is, see section 2). If atlas and kosmos
+  cannot be brought in line, a key on those two hosts is the fallback.
+
+**Environments on teuwen-ansible (until the branch is merged):**
+`/opt/kosmos-cluster/env` (ansible-core 2.16, master, other admins) and
+`/opt/kosmos-cluster/env-26.07` (ansible-core 2.17, this branch). Both stay
+until the merge; then the old one goes. The root disk of teuwen-ansible was
+95 % full (1.6 GB free) on 2026-09-04.
 
 ## 1. Conscious deviations from master
 
@@ -225,10 +289,11 @@ area has several leftovers that need a decision (update or remove).
   no reason given; the effect is that admins keep typing their password with
   `-K`, and nobody gets `NOPASSWD` sudo on all nodes as a side effect of a
   playbook run). Keeping sudo password-protected is sensible for a shared
-  cluster. **Revisit after the port, during `--check` testing:** re-enabling
-  only `bootstrap-ssh.yml` (key-based ssh for the admin running Ansible)
-  would remove the `-k` / ssh friction while keeping the sudo policy. A
-  variable guard defaulting to off would also be cleaner than commented lines.
+  cluster. **Resolved 2026-09-04:** ssh to the compute nodes works through
+  Kerberos (see "Running playbooks from teuwen-ansible"), so re-enabling
+  `bootstrap-ssh.yml` gains nothing there; the `-k` friction comes only from
+  atlas and kosmos. Keep both disabled. A variable guard defaulting to off
+  would still be cleaner than commented lines.
 - `playbooks/slurm-cluster/mount_scratch_disks.yml` and
   `playbooks/container/apptainer.yml` are not in the top-level playbook on
   master either; they only run when someone runs them by hand.
