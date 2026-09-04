@@ -2,18 +2,38 @@
 
 Branch `deepops-26.07` rebuilds this fork as **NVIDIA DeepOps tag 26.07 plus a
 small set of overlay commits**. The overlay ports what is on `master` (fork
-point: DeepOps 23.08, commit d248b658). This file has two sections:
+point: DeepOps 23.08, commit d248b658). Contents:
 
-1. **Conscious deviations from master**: every place where the branch
-   deliberately differs from `master`, why, and the commit. Other admins can
-   review each row and flip it back if they disagree.
-2. **Things to address after the port**: problems and oddities found while
-   porting that were left as they are on master. To be worked through once
-   the port is done.
+- **Before the first run**: the test recipe.
+- **1. Conscious deviations from master**: every place where the branch
+  deliberately differs from `master`, why, and the commit. Other admins can
+  review each row and flip it back if they disagree.
+- **2. Things to address after the port**: problems and oddities found while
+  porting that were left as they are on master, by priority.
 
 Rule used while porting: port `master` as is. Deviate only with a stated
 reason, and record it here. Design changes that nobody has asked for are
 not applied; they go into section 2.
+
+**Status (2026-09-04):** port complete, untested. Everything on `master` up
+to e812a659 has been ported, dropped with a row below, or superseded upstream.
+
+## Before the first run
+
+Do these in order, on teuwen-ansible with the shared venv
+(`/opt/kosmos-cluster/env`, ansible-core 2.16):
+
+1. `ansible-galaxy role install -r roles/requirements.yml -p roles/galaxy` and
+   `ansible-galaxy collection install -r collections/requirements.yml -p collections`
+   (26.07 pins; the old `roles/galaxy` from 23.08 is not compatible).
+2. Fix the default partition (section 2, "Urgent").
+3. Decide what to do with herakles (section 2, "Site config").
+4. `ansible-playbook playbooks/slurm-cluster.yml --syntax-check`.
+5. `ansible-playbook -K playbooks/slurm-cluster/slurm.yml --check --diff --limit gaia`
+   and compare the rendered `slurm.conf` diff against `/etc/slurm/slurm.conf`
+   on gaia. Expected differences: `KillWait`, the phased-out nodes disappearing.
+6. Only then consider a real run, playbook by playbook, starting with the
+   ones that are idempotent on the current nodes (motd, nvtop, create_mounts).
 
 ## 1. Conscious deviations from master
 
@@ -25,9 +45,7 @@ not applied; they go into section 2.
 | 2 | `roles/{slurm,nhc,nvidia-dcgm-exporter,nginx-docker-registry-cache,standalone-container-registry,pyxis}/defaults/main.yml` | untouched upstream files | overrides build/config paths to `/opt/kosmos-cluster/...`, `slurm_cluster_name: kosmos`, `standalone_container_registry_name: kosmos-registry`, `slurm_pyxis_version: 0.19.0` | Site values belong in `config/group_vars`, not in vendored roles. All of them are now set in `config/group_vars/{all,slurm-cluster}.yml`, derived from `deepops_dir` | c9d86ffc, chunk 5b |
 | 3 | `roles/slurm/templates/etc/slurm/slurm.conf` | `KillWait=120` (upstream 26.07 value) | `KillWait=30` | 30 was the 23.08 default, not a site choice. Upstream raised it in Sept 2024 for more graceful job termination. Behavior change: jobs get 120 s instead of 30 s between SIGTERM and SIGKILL. Flip: set `KillWait=30` in the template | c9d86ffc |
 | 4 | `playbooks/slurm-cluster/slurm.yml` | keeps `roles: [facts]` in the first play, in addition to the fact-gathering pre_task | removed the role, keeps only the pre_task | The role installs the custom fact scripts (`topology`, `memory`, `gpus`) that slurm.conf needs. Master relies on other playbooks having installed them. On existing nodes the role is a no-op (scripts unchanged since 23.08). Flip: delete the `roles:` block | 00ae45d2 |
-
 | 5 | `roles/spack.environment`, `playbooks/slurm-cluster/spack-modules.yml`, `roles/spack/defaults/main.yml` | untouched upstream (no spack.environment role, upstream spack-modules.yml, upstream spack pin v1.2.0) | adds a role that installs Spack profile scripts on all hosts plus zsh support, a play for it in spack-modules.yml, and pins spack v0.20.2 with gcc/gfortran deps (EricMarcus-ai and joren, June 2024) | Spack was never rolled out: `/sw` (shared NFS) has no spack directory, no node has `/etc/profile.d/z00_spack.*`, `spack` is not on the path, and `slurm_install_spack` is `false` in config so the play never runs. Confirmed with the admin that nobody uses Spack. Flip: `git checkout master -- roles/spack.environment playbooks/slurm-cluster/spack-modules.yml` and set `spack_version`/`spack_ubuntu_deps` in group_vars (upstream already has gcc/gfortran) | (not applied, chunk 4d) |
-
 | 6 | `config/group_vars/slurm-cluster.yml` | `slurm_cluster_install_singularity: no` | `yes` | Apptainer replaced Singularity on the nodes (chunk 4c) and upstream's singularity playbook is broken in 26.07 (`abims_sbr.singularity` dropped from requirements). Flip: set `yes` (and expect the playbook to fail) | chunk 5b |
 | 7 | `config/group_vars/slurm-cluster.yml` | `slurm_version: "23.02.4"` pinned | no pin in config (master pinned it in `roles/slurm/defaults`) | Upstream 26.07 defaults to 26.05.1. Slurm supports upgrading at most two major versions at once, so 23.02 -> 26.05 must be stepped; a Slurm upgrade is a separate project. Flip: remove the pin | chunk 5b |
 | 8 | `config/group_vars/slurm-cluster.yml` | `slurm_default_group`, `slurm_organization_name`, `slurm_install_spack` removed | defines them | No role or playbook on either branch reads the first two; the third follows from deviation 5. Flip: re-add the lines | chunk 5b |
@@ -85,7 +103,27 @@ Found while porting, deliberately left as on master. Not fixed because the
 port should not change how things are done without consulting the other
 admins.
 
+**By priority:**
+
+- **Blocking the first Slurm run:** no default partition after the phase-out
+  (5a). herakles differs from every other node (5b).
+- **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
+  dead per-host overrides in host_vars silently ignored (5a); nvtop builds an
+  unpinned git HEAD (4b); apptainer pin does not match the nodes (4c).
+- **Cleanup when convenient:** everything else below.
+
 ### Slurm role (commit c9d86ffc)
+
+- `roles/slurm/templates/etc/slurm/slurm.conf` carries
+  `# TODO create this as a fact` (joren, 2024-06-04): the partition-to-nodes
+  map is built with Jinja dict tricks inside the template. Computing it in
+  Ansible (`set_fact`) would be cleaner. Do it only once the branch can render
+  slurm.conf, so byte-identical output can be proven.
+- `roles/slurm/templates/etc/localgroups` (admin groups `sudo`,
+  `teuwen-sudoers`) and `prolog.d/50-create-scratch` (`/processing` path)
+  hardcode site values inside the role, as on master. Candidates for
+  variables in `config/group_vars`.
+
 ### Facts gathering (commit 00ae45d2)
 
 - `run_once: true` on the "Gather facts from ALL hosts" pre_task in
@@ -123,8 +161,6 @@ admins.
   gaia that file is now a symlink to `/usr/share/landscape/landscape-sysinfo.wrapper`
   (dated 2026-01-05), so a package update replaced the role's file after the
   last motd run. The role would put its copy back on the next run.
-- `roles/motd/templates/00-header.yml.j2` calls `tput` unconditionally and
-  prints warnings when `TERM` is unset (non-interactive use). Cosmetic.
 
 ### Apptainer (chunk 4c)
 
@@ -142,17 +178,11 @@ area has several leftovers that need a decision (update or remove).
   DeepOps' `singularity_wrapper` role before apptainer arrived. Apptainer
   ships its own `singularity` alias, so the old binary is shadowed only if
   `/usr/bin` wins in `PATH`. Candidate for removal once nobody depends on it.
-- **Upstream singularity path is broken and still enabled in config.**
-  26.07's `roles/singularity_wrapper` includes `abims_sbr.singularity`, which
-  is no longer in `roles/requirements.yml`, so `playbooks/container/singularity.yml`
-  fails on a clean setup. Master's `config/group_vars/slurm-cluster.yml`
-  still sets `slurm_cluster_install_singularity: yes`. To be set to `false`
-  in the site-config chunk; apptainer is the replacement.
 - **Not wired into the top-level playbook.** `playbooks/container/apptainer.yml`
-  is run by hand on master. Decide in the wiring chunk whether to add it to
-  `playbooks/slurm-cluster.yml` behind a variable.
-- The role downloads the .deb to `/tmp` and re-runs `apt update` on every
-  run; harmless but always "changed".
+  is run by hand, on master and here. Adding it to `playbooks/slurm-cluster.yml`
+  behind a variable would make apptainer part of a normal node build.
+  (Singularity install is off since deviation 6; upstream's singularity
+  playbook is broken in 26.07 anyway.)
 
 ### Spack and modules (chunk 4d, not ported)
 
@@ -202,8 +232,6 @@ area has several leftovers that need a decision (update or remove).
 - `config/host_vars/{carlos,mariecurie,plato,schrodinger}` (with their
   `gpu_topology` overrides) describe phased-out nodes; remove once the nodes
   are gone for good.
-- `kosmos` appears only in `[slurm-login]`, not under `[all]`. Works, but
-  inconsistent with the other hosts.
 - Upstream 26.07 adds `scripts/maas_inventory.py` to the inventory path in
   `ansible.cfg` (dynamic inventory from a Canonical MAAS server). Without
   MAAS credentials it returns an empty inventory and exits 0, so it is inert
@@ -229,5 +257,3 @@ area has several leftovers that need a decision (update or remove).
 - `slurm_enable_monitoring: true` but `[slurm-metric]` is empty (kosmos is
   commented out), so Prometheus/Grafana/Alertmanager have no target host and
   only the node/dcgm exporters get deployed.
-- `spack_default_packages:` is left as an empty key (as on master); harmless
-  while Spack is off.

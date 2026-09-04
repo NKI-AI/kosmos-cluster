@@ -1,5 +1,9 @@
 # DeepOps
 
+> **Kosmos fork (NKI AI for Oncology):** this branch is upstream DeepOps 26.07 plus a small
+> overlay for the KOSMOS Slurm cluster. Read [docs/kosmos/porting-notes.md](docs/kosmos/porting-notes.md)
+> before running anything: it lists every deviation from upstream and the open issues.
+
 Infrastructure automation tools for Kubernetes and Slurm clusters with NVIDIA GPUs.
 
 ## Table of Contents
