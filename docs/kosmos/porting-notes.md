@@ -66,14 +66,17 @@ identity for free.
   Interactive ssh then silently falls back to a password prompt; Ansible
   cannot answer one and fails with "Permission denied (publickey,gssapi...)"
   on every host. Run `kinit` and retry.
-- **`~/.ssh` must exist on teuwen-ansible.** `ansible.cfg` puts the ssh
-  control sockets in `~/.ssh/ansible-...`. Home directories on
-  teuwen-ansible are local (not the NFS home the nodes share), and a fresh
-  account has no `~/.ssh`. Plain ssh does not need the directory, Ansible
-  does. `mkdir -m 700 ~/.ssh` once. (Likely cause of the "ssh works but the
-  playbook cannot connect" seen on 2026-09-03: the directory did not exist
-  until an `ssh-keygen` created it as a side effect. Not confirmed from the
-  error text.)
+- **No `~/.ssh` needed on teuwen-ansible.** Upstream's `ansible.cfg` put
+  the ssh control sockets in `~/.ssh/ansible-...`, which does not exist on a
+  fresh account (homes on teuwen-ansible are local, not the NFS home the
+  nodes share, and Ansible never writes `known_hosts` there). Plain ssh
+  worked, the playbook did not. Likely cause of the "ssh works but the
+  playbook cannot connect" seen on 2026-09-03 (not confirmed from the error
+  text; the directory appeared when an `ssh-keygen` created it). Fixed on
+  this branch by dropping the override (deviation 0c): sockets now go to
+  `~/.ansible/cp`, which Ansible creates itself. No key pair is needed for
+  authentication either; see the root-key play below for the one place that
+  wants a `.pub` file.
 - **atlas and kosmos are the exception.** Both offer GSSAPI but reject the
   ticket, then fall through to password. Runs that touch them need `-k`
   (the first play of `playbooks/slurm-cluster/slurm.yml` gathers facts from
@@ -116,6 +119,7 @@ until the merge; then the old one goes. The root disk of teuwen-ansible was
 |---|-------|-------------|-------------|-----|--------|
 | 0a | `ansible.cfg` | `pipelining = True` (upstream) | `pipelining = False` (EricMarcus-ai, 2024-06-03, "Disable ansible pipelining", no reason given) | Pipelining halves the SSH round-trips per task. It only fails when sudo enforces `requiretty`, which the nodes do not (checked on gaia). Flip: set `pipelining = False` | (not applied, branch keeps upstream) |
 | 0b | `ansible.cfg` | no `[galaxy]` section (upstream) | `[galaxy] server = https://old-galaxy.ansible.com/` (Musab, 2023-11-02) | Temporary workaround from the late-2023 Galaxy migration; the host no longer serves content and 26.07 requirements resolve on galaxy.ansible.com. Flip: re-add the section | (not applied, branch keeps upstream) |
+| 0c | `ansible.cfg` | no `control_path` override: ssh control sockets go to Ansible's default `~/.ansible/cp`, which Ansible creates itself | upstream (since the 2018 initial commit, no reason given): `control_path = ~/.ssh/ansible-%%r@%%h:%%p` | With the upstream setting Ansible fails on a fresh account until `~/.ssh` exists, and nothing creates it (`UserKnownHostsFile=/dev/null` in the same file means ssh never writes `known_hosts` there either). Bit kosmas-ans on 2026-09-03. Where the sockets live makes no functional difference. Flip: restore the line and `mkdir -m 700 ~/.ssh` | chunk 7 |
 | 1 | `scripts/setup.sh` | venv default `/opt/kosmos-cluster/env` | venv in `./env` (upstream default) | Shared checkout and venv on teuwen-ansible, one environment for all admins | b084b7f1 |
 | 1b | `.github/workflows/setup.yml` | activates `/opt/kosmos-cluster/env` | upstream activates `/opt/deepops/env` (master still has the 23.08 workflows) | Follows deviation 1; the CI job failed on every push until the path matched. Flip together with deviation 1 | chunk 6 |
 | 2 | `roles/{slurm,nhc,nvidia-dcgm-exporter,nginx-docker-registry-cache,standalone-container-registry,pyxis}/defaults/main.yml` | untouched upstream files | overrides build/config paths to `/opt/kosmos-cluster/...`, `slurm_cluster_name: kosmos`, `standalone_container_registry_name: kosmos-registry`, `slurm_pyxis_version: 0.19.0` | Site values belong in `config/group_vars`, not in vendored roles. All of them are now set in `config/group_vars/{all,slurm-cluster}.yml`, derived from `deepops_dir` | c9d86ffc, chunk 5b |
