@@ -195,6 +195,37 @@ change:
   check mode, install the keyring on herakles by hand first, or accept the
   failure and run the exporter playbooks separately.
 
+### 2026-09-04, herakles and eudoxus, exporters (`--check --diff`)
+
+`prometheus-node-exporter.yml` and `nvidia-dcgm-exporter.yml` both start by
+importing `container/docker.yml` (kubespray's docker role), and both nodes
+failed there, so the exporter roles themselves are still untested in check
+mode (rerun with `-e docker_install=no` to skip docker). Log:
+`~kosmas-ans/check-exporters.log`.
+
+- **herakles:** check-mode artifact, same pattern as DCGM: the docker apt
+  source is only virtually added, so `containerd.io` is "not available".
+- **eudoxus, and every other docker node: a real run upgrades docker.**
+  All nine docker nodes run `docker-ce 5:26.1.2` and `containerd.io 1.6.28-2`,
+  held with `apt-mark hold` (the kubespray role holds them after install).
+  Site config does not pin a version (neither did master), so the 26.07
+  kubespray default applies: `docker_version: '28.3'` (28.3.3) and
+  `containerd.io 1.6.32`. In check mode apt refuses to touch held packages;
+  in a real run the role removes the hold first and the upgrade goes
+  through, restarting docker and with it the exporter containers on the
+  nodes that run them. Jobs do not use docker (enroot/apptainer), so the
+  impact is the monitoring restart, but it is a version change on every
+  node. The smallest change 26.07 allows is pinning `docker_version: '26.1'`
+  (= 26.1.4, a patch bump from 26.1.2) and `containerd_version: '1.6.32'`
+  (1.6.28 is not in kubespray's table any more) in `config/group_vars/all.yml`.
+  Decision for the admins: pin to the closest versions (same reasoning as
+  the Slurm pin, deviation 7) or accept 28.3. Not changed on the branch yet.
+- Side observation from the same survey: on the A6000, A100 and RTX nodes
+  the whole CUDA, driver and DCGM stack is on `apt-mark hold` (dozens of
+  packages), on gaia only docker, on herakles only leftover 550-series
+  packages. Whoever holds packages by hand should know the driver role
+  installs with apt and would fail or be blocked by holds on a branch change.
+
 ## 1. Conscious deviations from master
 
 | # | Where | Branch does | Master does | Why | Commit |
