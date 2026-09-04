@@ -91,3 +91,31 @@ admins.
   last motd run. The role would put its copy back on the next run.
 - `roles/motd/templates/00-header.yml.j2` calls `tput` unconditionally and
   prints warnings when `TERM` is unset (non-interactive use). Cosmetic.
+
+### Apptainer (chunk 4c)
+
+Ported as on master because nothing in 26.07 has the same name, but this
+area has several leftovers that need a decision (update or remove).
+
+- **Version drift.** `roles/apptainer/defaults/main.yml` pins 1.3.3. gaia
+  runs 1.4.0 (installed from a .deb, so someone ran the role with a newer
+  version or installed by hand). Current upstream release is 1.5.3. The pin
+  should match what the nodes run, and belongs in `config/group_vars`
+  rather than in the role's defaults.
+- **Two container runtimes on the nodes.** Besides apptainer, gaia still has
+  Singularity 3.7.1 in `/usr/local/bin/singularity` (config under
+  `/usr/local/etc/singularity`) and Go 1.20.6 under `/opt/go`, both left by
+  DeepOps' `singularity_wrapper` role before apptainer arrived. Apptainer
+  ships its own `singularity` alias, so the old binary is shadowed only if
+  `/usr/bin` wins in `PATH`. Candidate for removal once nobody depends on it.
+- **Upstream singularity path is broken and still enabled in config.**
+  26.07's `roles/singularity_wrapper` includes `abims_sbr.singularity`, which
+  is no longer in `roles/requirements.yml`, so `playbooks/container/singularity.yml`
+  fails on a clean setup. Master's `config/group_vars/slurm-cluster.yml`
+  still sets `slurm_cluster_install_singularity: yes`. To be set to `false`
+  in the site-config chunk; apptainer is the replacement.
+- **Not wired into the top-level playbook.** `playbooks/container/apptainer.yml`
+  is run by hand on master. Decide in the wiring chunk whether to add it to
+  `playbooks/slurm-cluster.yml` behind a variable.
+- The role downloads the .deb to `/tmp` and re-runs `apt update` on every
+  run; harmless but always "changed".
