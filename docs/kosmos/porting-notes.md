@@ -42,9 +42,25 @@ Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
 4. herakles: included in the tests as a normal node (decided 2026-09-04;
    see section 2, "Site config" for what a real run would change on it).
 5. `ansible-playbook playbooks/slurm-cluster.yml --syntax-check`.
-6. `ansible-playbook -K playbooks/slurm-cluster/slurm.yml --check --diff --limit gaia`
-   and compare the rendered `slurm.conf` diff against `/etc/slurm/slurm.conf`
-   on gaia. Expected differences: `KillWait`, the phased-out nodes disappearing.
+6. `ansible-playbook -kK --check --diff --limit gaia playbooks/slurm-cluster/slurm.yml`
+   (`-k` for atlas and kosmos). **Blocked 2026-09-04**: kosmos refuses admin
+   accounts, see "Running playbooks from teuwen-ansible". Note also that
+   with `slurm_conf_symlink: true` slurm.conf is rendered only on atlas into
+   `/sw/.slurm`; compute nodes get a symlink, so a gaia-only run shows the
+   other role-managed files but not slurm.conf. Alternative while blocked:
+   render the template locally with an ad-hoc play that gathers facts from
+   `slurm-node` and diff against `/sw/.slurm/slurm.conf`. Expected
+   differences: `KillWait`, the phased-out nodes disappearing, the default
+   partition moving to rtx2080ti.
+6b. While slurm.yml is blocked, `--check --diff` the playbooks the top-level
+   playbook imports that do not need atlas or kosmos, limited to compute
+   nodes (`--limit gaia,herakles` first, then all of `slurm-node`):
+   `nvidia-software/nvidia-driver.yml` (must report no change with the
+   per-host pins), `generic/software.yml`, `generic/chrony-client.yml`,
+   `slurm-cluster/nhc.yml`, `nvidia-software/nvidia-dcgm.yml`,
+   `generic/rsyslog-client.yml`, `slurm-cluster/prometheus-node-exporter.yml`,
+   `slurm-cluster/nvidia-dcgm-exporter.yml`. These are where the 26.07 roles
+   differ most from 23.08.
 7. Only then consider a real run, playbook by playbook, starting with the
    ones that are idempotent on the current nodes (motd, nvtop, create_mounts).
 
@@ -82,13 +98,17 @@ identity for free.
   every inventory host, so `-k` is needed there even with `--limit gaia`),
   or a key in your `authorized_keys` on those two hosts. Why the controller
   and login node behave differently from the compute nodes is an open
-  question for the admins. **A new admin account is not automatically
-  allowed on kosmos:** kosmas-ans (created 2026-09) is refused there with
-  password and Kerberos alike (PAM denies the account, the password prompt
-  just repeats), while atlas takes the password. Any `slurm.yml` run needs
-  both hosts (fact gathering from every inventory host, and kosmos is in
-  `slurm-login`), so check `ssh atlas` and `ssh kosmos` with the admin
-  account before the first run and get the account granted where it fails.
+  question for the admins. **kosmos currently refuses admin accounts
+  altogether (2026-09-04):** kosmas-ans and at least one other admin's
+  `-ans` account are denied with password and Kerberos alike (PAM denies
+  the account, the password prompt just repeats); regular user accounts get
+  in. Probably an access restriction set by central IT; the cluster admins
+  have no root on kosmos to check. The shared slurm.conf was last rendered
+  2025-12-08, so it worked then. Any `slurm.yml` run, on this branch or on
+  master, needs kosmos (fact gathering from every inventory host, and
+  kosmos is in `slurm-login`), so **the Slurm playbook is blocked for
+  everyone until admin access to kosmos is restored**. Being handled outside
+  this branch. atlas takes the password.
 - **Sudo on the nodes needs a password**: always `-K`. Same password as for
   `-k`.
 - Node home directories are NFS from rhea, shared by all nodes; an
@@ -190,9 +210,11 @@ admins.
 
 **By priority:**
 
-- **Blocking the first Slurm run:** nothing left. (The missing default
-  partition, 5a, is fixed on this branch; herakles turned out to be a normal
-  node with two playbooks never run against it, 5b.)
+- **Blocking the first Slurm run:** admin accounts cannot log in to kosmos
+  (see "Running playbooks from teuwen-ansible"); not a branch issue, being
+  handled with IT. (The missing default partition, 5a, is fixed on this
+  branch; herakles turned out to be a normal node with two playbooks never
+  run against it, 5b.)
 - **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
   dead per-host overrides in host_vars silently ignored (5a); nvtop builds an
   unpinned git HEAD (4b); apptainer pin does not match the nodes (4c).
