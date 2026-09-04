@@ -48,11 +48,11 @@ Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
    accounts, see "Running playbooks from teuwen-ansible". Note also that
    with `slurm_conf_symlink: true` slurm.conf is rendered only on atlas into
    `/sw/.slurm`; compute nodes get a symlink, so a gaia-only run shows the
-   other role-managed files but not slurm.conf. Alternative while blocked:
-   render the template locally with an ad-hoc play that gathers facts from
-   `slurm-node` and diff against `/sw/.slurm/slurm.conf`. Expected
-   differences: `KillWait`, the phased-out nodes disappearing, the default
-   partition moving to rtx2080ti.
+   other role-managed files but not slurm.conf. Alternative while blocked,
+   **done 2026-09-04**: `docs/kosmos/render-slurm-conf.yml` renders the
+   template locally from the compute nodes' custom facts (Kerberos only, no
+   atlas/kosmos); diff against `/sw/.slurm/slurm.conf`. See "Check-run
+   results".
 6b. While slurm.yml is blocked, `--check --diff` the playbooks the top-level
    playbook imports that do not need atlas or kosmos, limited to compute
    nodes (`--limit gaia,herakles` first, then all of `slurm-node`):
@@ -225,6 +225,29 @@ mode (rerun with `-e docker_install=no` to skip docker). Log:
   packages), on gaia only docker, on herakles only leftover 550-series
   packages. Whoever holds packages by hand should know the driver role
   installs with apt and would fail or be blocked by holds on a branch change.
+
+### 2026-09-04, slurm.conf rendered locally vs the live `/sw/.slurm/slurm.conf`
+
+`docs/kosmos/render-slurm-conf.yml` with env-26.07, facts from all ten
+compute nodes. The live file was rendered by master on 2025-12-08. Every
+difference is expected:
+
+- `KillWait=30` -> `120` (deviation 3).
+- carlos, plato, schrodinger, mariecurie node lines gone; partitions
+  `rtx2080ti_sm` and `p6000` gone; `rtx2080ti` becomes `Default=YES`
+  (phase-out commit e812a659 plus the default-partition fix, section 2).
+- `RealMemory` for aristarchus 980306 -> 980304 and gaia 489970 -> 489957:
+  the custom memory fact reports the current `MemTotal`, which moves by a
+  few MB across kernel updates. Harmless (lower than before, so slurmd
+  still accepts it).
+- gaia gains `Procs=128`: the topology fact now reports it, the 2025 render
+  predates that.
+- Trailing whitespace on the blank line after the node list.
+
+Everything else, including `ClusterName=kosmos`, every other node line,
+the prolog/epilog, cgroup and health-check settings, is byte-identical.
+This is the strongest evidence so far that the ported Slurm role and site
+config reproduce the running cluster.
 
 ## 1. Conscious deviations from master
 
