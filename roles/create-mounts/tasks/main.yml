@@ -1,0 +1,39 @@
+# This has to be done earlier because it's possible mount -a is executed by cronjob
+- name: create mounts if they don't exist
+  file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - /sw
+    - /data/groups/aiforoncology
+    - /data/groups/beets-tan
+    - /data/groups/nkiai
+    - /data/groups/public
+    - /projects
+    - /home
+    - /mnt/kronos/data_private
+    - /mnt/kronos/data_public
+    - /mnt/rhea/data_private
+    - /mnt/rhea/data_public
+
+- name: add mounts to /etc/fstab
+  blockinfile:
+    dest: /etc/fstab
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    content: |
+      kronos:/data-pool/software             /sw                          nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      kronos:/data-pool/groups/aiforoncology /data/groups/aiforoncology   nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      kronos:/data-pool/groups/beets-tan     /data/groups/beets-tan       nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      kronos:/data-pool/groups/nkiai         /data/groups/nkiai           nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      kronos:/data-pool/groups/public        /data/groups/public          nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      kronos:/data-pool/data_private         /mnt/kronos/data_private     nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      kronos:/data-pool/data_public          /mnt/kronos/data_public      nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      rhea:/project-pool/projects            /projects                    nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      rhea:/project-pool/network_homes       /home                        nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      rhea:/project-pool/data_private        /mnt/rhea/data_private       nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      rhea:/project-pool/data_public         /mnt/rhea/data_public        nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+  register: update_fstab
+
+- name: mount drives
+  command: mount -a
+  register: drives_mounted
