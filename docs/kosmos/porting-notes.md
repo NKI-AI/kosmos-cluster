@@ -37,7 +37,8 @@ Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
    line to your `.bashrc`.
 2. `source /opt/kosmos-cluster/env-26.07/bin/activate` for everything below.
 3. Fix the default partition (section 2, "Urgent"). Done: `rtx2080ti`.
-4. Decide what to do with herakles (section 2, "Site config").
+4. herakles: included in the tests as a normal node (decided 2026-09-04;
+   see section 2, "Site config" for what a real run would change on it).
 5. `ansible-playbook playbooks/slurm-cluster.yml --syntax-check`.
 6. `ansible-playbook -K playbooks/slurm-cluster/slurm.yml --check --diff --limit gaia`
    and compare the rendered `slurm.conf` diff against `/etc/slurm/slurm.conf`
@@ -116,8 +117,9 @@ admins.
 
 **By priority:**
 
-- **Blocking the first Slurm run:** herakles differs from every other node
-  (5b). (The missing default partition, 5a, is fixed on this branch.)
+- **Blocking the first Slurm run:** nothing left. (The missing default
+  partition, 5a, is fixed on this branch; herakles turned out to be a normal
+  node with two playbooks never run against it, 5b.)
 - **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
   dead per-host overrides in host_vars silently ignored (5a); nvtop builds an
   unpinned git HEAD (4b); apptainer pin does not match the nodes (4c).
@@ -263,16 +265,37 @@ area has several leftovers that need a decision (update or remove).
 
 ### Site config (chunk 5b)
 
-- **herakles was not provisioned by the playbooks.** Unlike gaia, eudoxus and
-  alanturing it has no NHC, no DCGM, no docker-ce, no exporters, and has
-  `podman-docker` installed. Site config enables NHC, DCGM, monitoring and
-  rsyslog for all nodes, so a full run against herakles would try to install
-  docker-ce next to podman-docker (conflicting `docker` command) and deploy
-  everything the other nodes have. Decide first whether herakles should be
-  brought in line or excluded (host_vars: `install_dcgm: false`,
-  `slurm_install_nhc: no`, ...).
-- eudoxus has `docker.dcgm-exporter.service` and `docker.node-exporter.service`
-  present but inactive; alanturing and gaia have them running.
+- **Nodes are not uniform: each one reflects the playbooks that were run by
+  hand when it was last (re)provisioned.** Master's top-level
+  `playbooks/slurm-cluster.yml` has not run on current Ansible for years
+  (`include:` syntax), so admins ran individual playbooks, and skipped
+  different ones on different nodes. Verified on the nodes 2026-09-04:
+  - **herakles** was provisioned with the master roles on 2024-07-06/07
+    (commit 5dce9a27): custom facts, Slurm built under
+    `/opt/kosmos-cluster/build`, site prolog/epilog scripts, enroot,
+    apptainer 1.3.3 (the role's pin), nvtop, motd, rsyslog forwarding, the
+    fstab mount block, slurm.conf symlink. Never run against it: `nhc.yml`
+    and `nvidia-dcgm.yml`, so it has no NHC and no DCGM although site config
+    enables both. Consequence today: the shared slurm.conf sets
+    `HealthCheckProgram=/usr/sbin/nhc`, which does not exist on herakles, so
+    it is the only compute node whose health checks cannot run. A full run of
+    the new branch would install both, which is the intended state. Also
+    `podman-docker` (installed by hand 2025-08-07) provides `/usr/bin/docker`;
+    it only conflicts with `playbooks/container/docker.yml`, which is not in
+    the top-level playbook and must not be run against herakles until
+    podman-docker is removed or docker-ce is decided against.
+  - **eudoxus** (provisioned 2024-08) has docker-ce, NHC and DCGM but no
+    running node exporter (`docker.node-exporter.service` present, inactive);
+    the dcgm-exporter unit is also inactive. gaia (rebuilt 2025-02) and
+    alanturing run both. `prometheus-node-exporter.yml` and
+    `nvidia-dcgm-exporter.yml` were not (re)run on eudoxus.
+  - docker-ce is on gaia and eudoxus only because someone ran
+    `playbooks/container/docker.yml` by hand; no top-level playbook installs
+    it on either branch. The node exporter and dcgm exporter run as docker
+    containers, so a node without docker-ce gets no exporters.
+  - The first `--check --diff` run of the new branch against all nodes will
+    list these gaps per node; that output is the to-do list for bringing the
+    nodes back in line.
 - `slurm_password` / `slurm_db_password` are still the upstream placeholder
   strings, on master and here. They should live in an Ansible vault.
 - `slurm_install_nhc: yes` with the default NHC config; the comment in the
