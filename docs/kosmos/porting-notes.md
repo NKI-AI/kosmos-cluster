@@ -26,6 +26,8 @@ not applied; they go into section 2.
 | 3 | `roles/slurm/templates/etc/slurm/slurm.conf` | `KillWait=120` (upstream 26.07 value) | `KillWait=30` | 30 was the 23.08 default, not a site choice. Upstream raised it in Sept 2024 for more graceful job termination. Behavior change: jobs get 120 s instead of 30 s between SIGTERM and SIGKILL. Flip: set `KillWait=30` in the template | c9d86ffc |
 | 4 | `playbooks/slurm-cluster/slurm.yml` | keeps `roles: [facts]` in the first play, in addition to the fact-gathering pre_task | removed the role, keeps only the pre_task | The role installs the custom fact scripts (`topology`, `memory`, `gpus`) that slurm.conf needs. Master relies on other playbooks having installed them. On existing nodes the role is a no-op (scripts unchanged since 23.08). Flip: delete the `roles:` block | 00ae45d2 |
 
+| 5 | `roles/spack.environment`, `playbooks/slurm-cluster/spack-modules.yml`, `roles/spack/defaults/main.yml` | untouched upstream (no spack.environment role, upstream spack-modules.yml, upstream spack pin v1.2.0) | adds a role that installs Spack profile scripts on all hosts plus zsh support, a play for it in spack-modules.yml, and pins spack v0.20.2 with gcc/gfortran deps (EricMarcus-ai and joren, June 2024) | Spack was never rolled out: `/sw` (shared NFS) has no spack directory, no node has `/etc/profile.d/z00_spack.*`, `spack` is not on the path, and `slurm_install_spack` is `false` in config so the play never runs. Confirmed with the admin that nobody uses Spack. Flip: `git checkout master -- roles/spack.environment playbooks/slurm-cluster/spack-modules.yml` and set `spack_version`/`spack_ubuntu_deps` in group_vars (upstream already has gcc/gfortran) | (not applied, chunk 4d) |
+
 ### Master changes not carried over (superseded upstream)
 
 These master changes were not carried over because 26.07 already contains the
@@ -119,3 +121,15 @@ area has several leftovers that need a decision (update or remove).
   `playbooks/slurm-cluster.yml` behind a variable.
 - The role downloads the .deb to `/tmp` and re-runs `apt update` on every
   run; harmless but always "changed".
+
+### Spack and modules (chunk 4d, not ported)
+
+- `roles/motd/templates/00-header.yml.j2` tells users "Loading of modules
+  can be done using 'spack'", but Spack is not installed anywhere. Either
+  remove the line or roll Spack out.
+- Lmod on the nodes is version 6.6 (2016). Check what the upstream `lmod`
+  role installs in 26.07 before the first run of the new branch.
+- If Spack is rolled out later: upstream 26.07 pins v1.2.0 and installs the
+  profile scripts only on the host that clones Spack (`slurm-master[0]`),
+  while the install lives on shared NFS. Master's all-hosts play and zsh
+  template (see deviation 5) would still be needed.
