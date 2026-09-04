@@ -7,8 +7,7 @@
 # virtualenv
 /.venv/
 
-# claude code
-/CLAUDE.md
+# claude code (kosmos: CLAUDE.md is tracked, it points at AGENTS.md and the porting notes)
 /tasks/
 
 # project-specific
