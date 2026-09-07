@@ -23,19 +23,39 @@ squeue_bin="{{ slurm_install_prefix }}/bin/squeue"
 # "scontrol show job": on recent Slurm the pattern TRES=cpu= matched both the
 # ReqTRES= and AllocTRES= lines, yielding a multi-line value that never
 # compared equal, so exclusive jobs were never detected.
+#
+# The lookup runs inside a conditional on purpose. This script has "set -e", so
+# a bare assignment from a failing squeue aborts the whole prolog/epilog run and
+# fails the job; redirecting stderr does not suppress the exit status. A failed,
+# empty or non-numeric lookup must instead leave exclusive=0, which only skips
+# the *-exclusive-* scripts and lets every other script run.
 exclusive=0
-numcpus_job=$("$squeue_bin" -h -j "$SLURM_JOBID" -o %C 2>/dev/null)
-numnodes_job=$("$squeue_bin" -h -j "$SLURM_JOBID" -o %D 2>/dev/null)
-numcpus_sys=$(( $(grep -c ^processor /proc/cpuinfo) * ${numnodes_job:-1} ))
-if [ -n "$numcpus_job" ] && [ "$numcpus_sys" -eq "$numcpus_job" ] 2>/dev/null ; then
-    exclusive=1
+if job_alloc=$("$squeue_bin" -h -j "$SLURM_JOBID" -o "%C %D" 2>/dev/null); then
+    read -r numcpus_job numnodes_job <<<"$job_alloc" || true
+    if [[ "$numcpus_job" =~ ^[0-9]+$ ]] && [[ "$numnodes_job" =~ ^[0-9]+$ ]]; then
+        numcpus_sys=$(( $(grep -c ^processor /proc/cpuinfo) * numnodes_job ))
+        if [ "$numcpus_sys" -eq "$numcpus_job" ]; then
+            exclusive=1
+        fi
+    else
+        log "[WARN] squeue returned no usable allocation for job ${SLURM_JOBID} ('${job_alloc}'); treating the job as non-exclusive."
+    fi
+else
+    log "[WARN] squeue failed for job ${SLURM_JOBID}; treating the job as non-exclusive."
 fi
 
-# Find out if there are any more jobs on this node for this user
+# Find out if there are any more jobs on this node for this user.
+# Same reasoning as above with one difference: a failed lookup must not be read
+# as "no other jobs", because that would run the *-lastuserjob-* cleanup scripts
+# while another job of the same user is still on the node. Piping squeue into
+# "wc -l" also hides its exit status, so the status is captured explicitly.
 last_user_job=0
-num_jobs=$("$squeue_bin" -h -u "$SLURM_JOB_USER" -w "$HOSTNAME" -t running | wc -l)
-if [ "$num_jobs" -eq 0 ]; then
-    last_user_job=1
+if user_jobs=$("$squeue_bin" -h -u "$SLURM_JOB_USER" -w "$HOSTNAME" -t running 2>/dev/null); then
+    if [ -z "$user_jobs" ]; then
+        last_user_job=1
+    fi
+else
+    log "[WARN] squeue failed while counting jobs for ${SLURM_JOB_USER} on ${HOSTNAME}; not running the last-user-job scripts."
 fi
 
 # Re-implement run-parts since on centos it is just a bash script with no useful flags.
