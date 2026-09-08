@@ -311,6 +311,7 @@ ansible-playbook -K --check --diff --limit 'slurm-node:!gaia' \
 |---|-------|-------------|-------------|-----|--------|
 | 0a | `ansible.cfg` | `pipelining = True` (upstream) | `pipelining = False` (EricMarcus-ai, 2024-06-03, "Disable ansible pipelining", no reason given) | Pipelining halves the SSH round-trips per task. It only fails when sudo enforces `requiretty`, which the nodes do not (checked on gaia). Flip: set `pipelining = False` | (not applied, branch keeps upstream) |
 | 0b | `ansible.cfg` | no `[galaxy]` section (upstream) | `[galaxy] server = https://old-galaxy.ansible.com/` (Musab, 2023-11-02) | Temporary workaround from the late-2023 Galaxy migration; the host no longer serves content and 26.07 requirements resolve on galaxy.ansible.com. Flip: re-add the section | (not applied, branch keeps upstream) |
+| 0d | `ansible.cfg` | `fact_caching_connection = ~/.ansible/fact_cache` (per user; Ansible expands `~` and creates the directory) | upstream and master: `/var/tmp/ansible_cache` | On teuwen-ansible that directory is `root:teu-ansible` mode 0700, so every admin got "error in 'jsonfile' cache ... disabling plugin" and facts were gathered on every run. A per-user path needs no shared directory or group. Flip: restore the path and `chmod` / `chgrp` the directory for the admin group | 2026-09-08 |
 | 0c | `ansible.cfg` | no `control_path` override: ssh control sockets go to Ansible's default `~/.ansible/cp`, which Ansible creates itself | upstream (since the 2018 initial commit, no reason given): `control_path = ~/.ssh/ansible-%%r@%%h:%%p` | With the upstream setting Ansible fails on a fresh account until `~/.ssh` exists, and nothing creates it (`UserKnownHostsFile=/dev/null` in the same file means ssh never writes `known_hosts` there either). Bit kosmas-ans on 2026-09-03. Where the sockets live makes no functional difference. Flip: restore the line and `mkdir -m 700 ~/.ssh` | chunk 7 |
 | 1 | `scripts/setup.sh` | venv default `/opt/kosmos-cluster/env` | venv in `./env` (upstream default) | Shared venv on teuwen-ansible, one Ansible for all admins; clones are per admin (decided 2026-09-08, see "Setup decision") | b084b7f1 |
 | 1b | `.github/workflows/setup.yml` | activates `/opt/kosmos-cluster/env` | upstream activates `/opt/deepops/env` (master still has the 23.08 workflows) | Follows deviation 1; the CI job failed on every push until the path matched. Flip together with deviation 1 | chunk 6 |
@@ -475,13 +476,12 @@ area has several leftovers that need a decision (update or remove).
 
 ### Ansible node (found while building env-26.07)
 
-- `ansible.cfg` sets `fact_caching_connection = /var/tmp/ansible_cache`, but
-  on teuwen-ansible that directory is `root:teu-ansible` mode 0700, so every
-  admin gets "error in 'jsonfile' cache ... disabling plugin" and facts are
-  gathered on every run instead of being cached. Harmless, but slow. Now that
-  clones are per admin (setup decision, 2026-09-08), the cleanest fix is a
-  per-user path, e.g. `fact_caching_connection = ~/.ansible/fact_cache`;
-  making the directory group-writable for the admin group also works.
+- Fixed 2026-09-08 (deviation 0d): `ansible.cfg` pointed the fact cache at
+  `/var/tmp/ansible_cache`, which on teuwen-ansible is `root:teu-ansible`
+  mode 0700, so every admin got "error in 'jsonfile' cache ... disabling
+  plugin" and facts were gathered on every run. Now `~/.ansible/fact_cache`,
+  per user; verified with a local `setup` run that the directory is created
+  and the warning is gone.
 
 ### Fact gathering fails on nodes with many NFS submounts (found 2026-09-04)
 
