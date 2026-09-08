@@ -1,27 +1,6 @@
 ---
-- hosts:  "{{ hostlist | default('slurm-master,slurm-login,slurm-node,outside') }}"
-  become: yes
+- hosts: "{{ hostlist | default('slurm-cluster') }}"
+  become: true
   gather_facts: false
-  tasks:
-    - name: Gather minimal facts (avoid expensive full fact gathering)
-      setup:
-        gather_subset:
-          - min
-
-    - name: Gather custom facts
-      include_role:
-        name: facts
-
-    - name: Dump
-      delegate_to: localhost
-      run_once: true
-      when: dump_facts | default(false)
-      tags:
-        - dump
-      copy:
-       content: "{{ ansible_local | to_nice_json }}"
-       dest: /tmp/setup-dump.json
-
-    - name: Create mount points
-      include_role:
-        name: create-mounts
+  roles:
+    - create-mounts

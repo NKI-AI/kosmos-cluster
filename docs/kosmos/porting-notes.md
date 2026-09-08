@@ -603,8 +603,8 @@ and Slurm is upgraded. Everything below waits for that day; until then only
   via `roles/facts` (always refresh on the slurm.conf path, not the 24 h
   cache). Hardware/network only if a play needs them. NHC `nhc.conf.j2`
   uses `ansible_local.memory` and no longer loops `ansible_interfaces`.
-  `create_mounts.yml` still does its own explicit `min` `setup`; optional
-  cleanup later.
+  `create_mounts.yml` does not gather facts because its role does not consume
+  any.
 
 ### NFS mounts (chunk 4a)
 
@@ -615,11 +615,10 @@ and Slurm is upgraded. Everything below waits for that day; until then only
   (currently off, `slurm_enable_nfs_client_nodes: false`) replaces both this
   role and `playbooks/generic/nfs-general.yml`, which today is the only thing
   that installs `nfs-common`. Until then both stay.
-- `playbooks/slurm-cluster/create_mounts.yml` lists an `outside` group that
-  is commented out in `config/inventory`. Harmless: Ansible warns "Could not
-  match supplied host pattern, ignoring: outside" and the play still runs on
-  slurm-master, slurm-login and slurm-node (corrected 2026-09-08; an earlier
-  note claimed the play was skipped). Drop the word to silence the warning.
+- Fixed: `playbooks/slurm-cluster/create_mounts.yml` now targets the existing
+  `slurm-cluster` parent group and invokes only the mount role. Its unused
+  minimal/custom fact gathering and debug dump are gone, as is the warning
+  for the commented-out `outside` group.
 - `playbooks/slurm-cluster/mount_scratch_disks.yml` runs `exportfs -a` and
   `mount -a` unconditionally on every run (always reports "changed").
 
