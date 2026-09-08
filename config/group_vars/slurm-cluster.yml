@@ -8,6 +8,12 @@
 # time, so a Slurm upgrade is a separate project (see docs/kosmos/porting-notes.md).
 slurm_version: "23.02.4"
 
+# Slurm 25.11 and newer can propagate an ordinary slurmctld restart as a
+# reconfiguration request to every slurmd and sackd. Keep this version-gated
+# so the current 23.02 controller never sees an unsupported parameter; it can
+# also be overridden to false during a rolling upgrade.
+slurm_enable_reconfig_on_restart: "{{ slurm_version is version('25.11', '>=') }}"
+
 # kosmos: site paths. Upstream roles default to /opt/deepops; master carried
 # these as edits to roles/*/defaults, here they live in site config.
 slurm_build_dir: "{{ deepops_dir }}/build/slurm"
