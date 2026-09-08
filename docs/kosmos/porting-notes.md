@@ -622,6 +622,34 @@ and Slurm is upgraded. Everything below waits for that day; until then only
 - `playbooks/slurm-cluster/mount_scratch_disks.yml` runs `exportfs -a` and
   `mount -a` unconditionally on every run (always reports "changed").
 
+- **Potential follow-up, shared mounts:** move the eleven kronos/rhea mount
+  definitions and their common options into structured site variables in
+  `config/group_vars/slurm-cluster.yml`. First keep the existing
+  `blockinfile` marker and render the same block from those variables, so site
+  data leaves the role without changing fstab. Later the upstream `nfs` client
+  role could replace both the custom role and `nfs-general.yml`; it already
+  installs `nfs-common`, creates mount points and uses the mount module. Set
+  `nfs_client_group: slurm-cluster` then, because atlas and kosmos also receive
+  the mounts, and preserve every current source, target and option.
+- **Potential follow-up, fstab migration:** removal of the existing
+  `# ANSIBLE MANAGED BLOCK` needs an explicit migration. Do not leave the old
+  block and individual mount entries under two managers. Check mode does not
+  apply a block removal before later tasks inspect fstab, so review the complete
+  diff for duplicate or missing `/sw`, `/home`, `/projects`, `/data/groups/*`
+  and `/mnt/{kronos,rhea}/*` entries. Keep this separate from the Slurm upgrade.
+- **Potential follow-up, scratch mounts:** generate a managed exports block
+  from `mount-scratch` so removed clients disappear from `/etc/exports`, notify
+  `exportfs -ra` only when it changes, and manage one mount entry per
+  `scratch-node` instead of running `mount -a`. Preserve `/processing` and
+  Gaia's `/mnt/processing/<node>` layout. Validate both inventory groups and
+  every generated host/path before changing either system file. This is a
+  separate change from the shared kronos/rhea mounts.
+- Before widening the limit, check the shared-mount change separately on gaia,
+  atlas (`-kK`) and kosmos, and check the scratch change separately on gaia and
+  `scratch-node`, always with `--check --diff`. Check mode cannot prove NFS
+  reachability or a command-only mount/export action; those remain
+  maintenance-window validation items.
+
 ### nvtop and motd (chunk 4b)
 
 - **Fixed 2026-09-08 (deviation 15).** `roles/nvtop` cloned the Syllo/nvtop
