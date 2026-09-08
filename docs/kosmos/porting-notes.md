@@ -383,6 +383,10 @@ Found while porting, deliberately left as on master. Not fixed because the
 port should not change how things are done without consulting the other
 admins.
 
+Every item below was re-checked on 2026-09-08 against the branch and all
+ten compute nodes (two independent passes). Items that turned out not to be
+issues were removed; corrections are marked "corrected 2026-09-08".
+
 **By priority:**
 
 - **Blocking the first Slurm run:** admin accounts cannot log in to kosmos
@@ -390,9 +394,16 @@ admins.
   handled with IT. (The missing default partition, 5a, is fixed on this
   branch; herakles turned out to be a normal node with two playbooks never
   run against it, 5b.)
+- **Decide before the first full run of `playbooks/slurm-cluster.yml`:**
+  the monitoring section installs docker-ce on every host, which fails on
+  herakles (podman-docker) and upgrades docker on gaia and eudoxus (5b);
+  the inline `hostlist=` on three `import_playbook` lines is ignored, so
+  NHC and DCGM also target atlas and kosmos (4e); the apptainer role fails
+  on gaia and aristarchus, which run newer versions than the pin (4c).
 - **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
   dead per-host overrides in host_vars silently ignored (5a); nvtop builds an
-  unpinned git HEAD (4b); apptainer pin does not match the nodes (4c).
+  unpinned git HEAD (4b); the motd role downgrades Ubuntu's
+  `50-landscape-sysinfo` (4b).
 - **Cleanup when convenient:** everything else below.
 
 ### Slurm role (commit c9d86ffc)
@@ -418,49 +429,60 @@ admins.
 - `roles/create-mounts/tasks/main.yml` hardcodes the kronos and rhea export
   list and mount options inside the role. Upstream's `nfs` role takes the same
   information from `nfs_mounts` in `config/group_vars`; moving it there would
-  keep site data out of role code.
-- The fstab block in that role uses Ansible's default `blockinfile` marker
-  text. Any other `blockinfile` on `/etc/fstab` with the default marker would
-  replace it. Nothing in 26.07 does, but a custom marker would be safer.
-- `playbooks/slurm-cluster/create_mounts.yml` targets an `outside` group that
-  is commented out in `config/inventory`, so it is silently skipped.
+  keep site data out of role code. If that happens, `nfs-client.yml`
+  (currently off, `slurm_enable_nfs_client_nodes: false`) replaces both this
+  role and `playbooks/generic/nfs-general.yml`, which today is the only thing
+  that installs `nfs-common`. Until then both stay.
+- `playbooks/slurm-cluster/create_mounts.yml` lists an `outside` group that
+  is commented out in `config/inventory`. Harmless: Ansible warns "Could not
+  match supplied host pattern, ignoring: outside" and the play still runs on
+  slurm-master, slurm-login and slurm-node (corrected 2026-09-08; an earlier
+  note claimed the play was skipped). Drop the word to silence the warning.
 - `playbooks/slurm-cluster/mount_scratch_disks.yml` runs `exportfs -a` and
   `mount -a` unconditionally on every run (always reports "changed").
-- `playbooks/generic/nfs-general.yml` exists only to install `nfs-common`;
-  upstream's `nfs-client.yml` would do the same if
-  `slurm_enable_nfs_client_nodes` were on, but that also expects `nfs_mounts`.
 
 ### nvtop and motd (chunk 4b)
 
 - `roles/nvtop` clones the Syllo/nvtop GitHub repository with `update: yes`
   and builds whatever HEAD is that day. Nodes can end up on different
   versions, and the cmake / make install tasks report "changed" on every run.
-  Pinning a tag (gaia currently runs 3.1.0) would fix both. Reason the role
-  exists: Ubuntu 22.04's packaged nvtop is 1.2.2, too old for current GPUs.
+  Pinning a tag would fix both. State 2026-09-08: every node reports 3.1.0,
+  but the checkouts differ (gaia `3.1.0-100-gf901275`, all others
+  `3.1.0-9-g0316ce1`), so the drift is real. Reason the role exists: Ubuntu
+  22.04's packaged nvtop is 1.2.2, too old for current GPUs.
 - `playbooks/slurm-cluster/nvtop.yml` sets a `has_gpus` fact from the custom
   `gpus` fact, but the nvtop role never reads it, so nvtop is also built on
   CPU-only nodes such as gaia.
-- `roles/motd` installs its own copy of Ubuntu's `50-landscape-sysinfo`. On
-  gaia that file is now a symlink to `/usr/share/landscape/landscape-sysinfo.wrapper`
-  (dated 2026-01-05), so a package update replaced the role's file after the
-  last motd run. The role would put its copy back on the next run.
+- `roles/motd/templates/50-landscape-sysinfo.yml.j2` is a verbatim copy of
+  Ubuntu's old, pre-caching `50-landscape-sysinfo` script with no site
+  content. On all ten nodes that path is now a symlink to
+  `/usr/share/landscape/landscape-sysinfo.wrapper`, the newer caching
+  version (LP #1893716). The role replaces the symlink with the older
+  script on every run. Fix: drop the sysinfo task and template from the
+  role and keep only the header (corrected 2026-09-08; the earlier note
+  treated the package update as the problem).
 
 ### Apptainer (chunk 4c)
 
 Ported as on master because nothing in 26.07 has the same name, but this
 area has several leftovers that need a decision (update or remove).
 
-- **Version drift.** `roles/apptainer/defaults/main.yml` pins 1.3.3. gaia
-  runs 1.4.0 (installed from a .deb, so someone ran the role with a newer
-  version or installed by hand). Current upstream release is 1.5.3. The pin
-  should match what the nodes run, and belongs in `config/group_vars`
-  rather than in the role's defaults.
-- **Two container runtimes on the nodes.** Besides apptainer, gaia still has
-  Singularity 3.7.1 in `/usr/local/bin/singularity` (config under
-  `/usr/local/etc/singularity`) and Go 1.20.6 under `/opt/go`, both left by
-  DeepOps' `singularity_wrapper` role before apptainer arrived. Apptainer
-  ships its own `singularity` alias, so the old binary is shadowed only if
-  `/usr/bin` wins in `PATH`. Candidate for removal once nobody depends on it.
+- **Version drift, and the role fails on the drifted nodes.**
+  `roles/apptainer/defaults/main.yml` pins 1.3.3, and eight of ten nodes
+  run exactly that. gaia runs 1.4.0 and aristarchus 1.5.3 (the current
+  upstream release), both from a .deb installed by hand or with a
+  different pin. The role installs with `apt: deb:` without
+  `allow_downgrade`, so on those two nodes the task fails with "A later
+  version is already installed" instead of downgrading (corrected
+  2026-09-08). Decide the pin (1.5.3 is the obvious choice), and move it to
+  `config/group_vars` rather than the role's defaults.
+- **Two container runtimes on the nodes.** Besides apptainer, every node
+  (not only gaia) still has Singularity 3.7.1 in
+  `/usr/local/bin/singularity` (config under `/usr/local/etc/singularity`)
+  and Go 1.20.6 under `/opt/go`, both left by DeepOps' `singularity_wrapper`
+  role before apptainer arrived. Apptainer ships its own `singularity`
+  alias, so the old binary is shadowed only if `/usr/bin` wins in `PATH`.
+  Candidate for removal once nobody depends on it.
 - **Not wired into the top-level playbook.** `playbooks/container/apptainer.yml`
   is run by hand, on master and here. Adding it to `playbooks/slurm-cluster.yml`
   behind a variable would make apptainer part of a normal node build.
@@ -472,8 +494,11 @@ area has several leftovers that need a decision (update or remove).
 - `roles/motd/templates/00-header.yml.j2` tells users "Loading of modules
   can be done using 'spack'", but Spack is not installed anywhere. Either
   remove the line or roll Spack out.
-- Lmod on the nodes is version 6.6 (2016). Check what the upstream `lmod`
-  role installs in 26.07 before the first run of the new branch.
+- Lmod on the nodes is version 6.6 (2016), which is simply Ubuntu 22.04's
+  `lmod` package. The upstream `lmod` role installs that same package on
+  Debian-family hosts, so the first run changes nothing here (checked
+  2026-09-08). A newer Lmod would need another source. herakles has no
+  Lmod at all (see 5b).
 - If Spack is rolled out later: upstream 26.07 pins v1.2.0 and installs the
   profile scripts only on the host that clones Spack (`slurm-master[0]`),
   while the install lives on shared NFS. Master's all-hosts play and zsh
@@ -517,16 +542,24 @@ area has several leftovers that need a decision (update or remove).
 
 ### Top-level playbook wiring (chunk 4e)
 
+- **Inline `hostlist=` on `import_playbook` is ignored (found
+  2026-09-08).** `playbooks/slurm-cluster.yml` has three lines of the form
+  `import_playbook: x.yml hostlist=slurm-node` (container registry, line 31;
+  `nvidia-dcgm.yml`, line 78; `nhc.yml`, line 82). ansible-core 2.17 keeps
+  only the file name and drops the rest, so those playbooks fall back to
+  their `hosts: all` default: `--list-hosts` shows the NHC and DCGM plays on
+  all twelve hosts, including atlas and kosmos. (DCGM is still off on atlas
+  through its host_vars; NHC is not.) The registry playbook is gated off by
+  `slurm_enable_container_registry: false`. Same lines in upstream 26.07,
+  so an upstream bug. The `vars: hostlist:` form used elsewhere in the file
+  works. Never showed in testing because every check run used
+  `--limit slurm-node`. Fix before the first unlimited run: switch the three
+  lines to the `vars:` form.
 - `bootstrap-ssh.yml` and `bootstrap-sudo.yml` are disabled by commenting
-  them out in `playbooks/slurm-cluster.yml`, as on master (joren, 2024-06-05,
-  no reason given; the effect is that admins keep typing their password with
-  `-K`, and nobody gets `NOPASSWD` sudo on all nodes as a side effect of a
-  playbook run). Keeping sudo password-protected is sensible for a shared
-  cluster. **Resolved 2026-09-04:** ssh to the compute nodes works through
-  Kerberos (see "Running playbooks from teuwen-ansible"), so re-enabling
-  `bootstrap-ssh.yml` gains nothing there; the `-k` friction comes only from
-  atlas and kosmos. Keep both disabled. A variable guard defaulting to off
-  would still be cleaner than commented lines.
+  them out in `playbooks/slurm-cluster.yml`, as on master (joren,
+  2024-06-05). Decided 2026-09-04: keep both disabled. ssh to the compute
+  nodes works through Kerberos and sudo stays password-protected (`-K`),
+  which is sensible for a shared cluster.
 - `playbooks/slurm-cluster/mount_scratch_disks.yml` and
   `playbooks/container/apptainer.yml` are not in the top-level playbook on
   master either; they only run when someone runs them by hand.
@@ -550,16 +583,13 @@ area has several leftovers that need a decision (update or remove).
   from `partition_settings[<partition>]`. gaia (1900 vs 1000), galileo
   (3800 vs 7000, 20160 vs 10080), ptolemaeus (20160 vs 10080) and hamilton
   (6000 vs 5700) differ from their partition, so someone intended per-host
-  overrides that never took effect. Either drop the host values or make the
-  template honour them.
+  overrides that never took effect. The comment above `partition_settings`
+  in `config/group_vars/slurm-cluster.yml` ("individual nodes can overwrite
+  settings in host_vars") is therefore wrong too. Either drop the host
+  values or make the template honour them.
 - `config/host_vars/{carlos,mariecurie,plato,schrodinger}` (with their
   `gpu_topology` overrides) describe phased-out nodes; remove once the nodes
   are gone for good.
-- Upstream 26.07 adds `scripts/maas_inventory.py` to the inventory path in
-  `ansible.cfg` (dynamic inventory from a Canonical MAAS server). Without
-  MAAS credentials it returns an empty inventory and exits 0, so it is inert
-  here. Left as upstream ships it; the static `config/inventory` remains the
-  source of truth.
 
 ### Site config (chunk 5b)
 
@@ -577,27 +607,39 @@ area has several leftovers that need a decision (update or remove).
     enables both. Consequence today: the shared slurm.conf sets
     `HealthCheckProgram=/usr/sbin/nhc`, which does not exist on herakles, so
     it is the only compute node whose health checks cannot run. A full run of
-    the new branch would install both, which is the intended state. Also
-    `podman-docker` (installed by hand 2025-08-07) provides `/usr/bin/docker`;
-    it only conflicts with `playbooks/container/docker.yml`, which is not in
-    the top-level playbook and must not be run against herakles until
-    podman-docker is removed or docker-ce is decided against.
-  - **eudoxus** (provisioned 2024-08) has docker-ce, NHC and DCGM but no
-    running node exporter (`docker.node-exporter.service` present, inactive);
-    the dcgm-exporter unit is also inactive. gaia (rebuilt 2025-02) and
-    alanturing run both. `prometheus-node-exporter.yml` and
-    `nvidia-dcgm-exporter.yml` were not (re)run on eudoxus.
-  - docker-ce is on gaia and eudoxus only because someone ran
-    `playbooks/container/docker.yml` by hand; no top-level playbook installs
-    it on either branch. The node exporter and dcgm exporter run as docker
-    containers, so a node without docker-ce gets no exporters.
+    the new branch would install both, which is the intended state. It also
+    has no `lmod` package (`lmod.yml` never ran) and no docker-ce: it is the
+    only node without it. Instead `podman-docker` (installed by hand
+    2025-08-07) owns `/usr/bin/docker`. See the docker item below for why
+    that matters.
+  - **eudoxus** (provisioned 2024-08): node exporter and dcgm exporter both
+    active as of 2026-09-08 (an earlier note found the node exporter
+    inactive; that is stale). **aristarchus**: node exporter unit `failed`,
+    dcgm exporter inactive. All other GPU nodes run both; gaia (CPU-only)
+    runs the node exporter.
+  - **docker-ce comes with the monitoring section, on every host (corrected
+    2026-09-08).** `prometheus-node-exporter.yml` and
+    `nvidia-dcgm-exporter.yml` each import `container/docker.yml`, whose
+    hosts default to `all`; the top-level playbook imports both without a
+    hostlist, gated only by `slurm_enable_monitoring: true`, and
+    `docker_install: yes` is set in `config/group_vars/all.yml`. So a full
+    run of `playbooks/slurm-cluster.yml` installs docker-ce on all twelve
+    hosts, including atlas and kosmos. Same wiring on master. That is how
+    nine of ten nodes got docker-ce (the earlier note blamed hand runs).
+    Consequences: on herakles the install fails, because docker-ce-cli
+    neither conflicts with nor replaces podman-docker and dpkg refuses to
+    overwrite `/usr/bin/docker`; on gaia and eudoxus (held at 26.1.2)
+    kubespray's pin upgrades docker to 28.3. Decide before the first full
+    run: remove podman-docker from herakles (or docker-ce from the
+    cluster), and whether the docker upgrade is wanted. Until then run the
+    exporter playbooks with `-e docker_install=false` or `--limit`.
   - The first `--check --diff` run of the new branch against all nodes will
     list these gaps per node; that output is the to-do list for bringing the
     nodes back in line.
 - `slurm_password` / `slurm_db_password` are still the upstream placeholder
   strings, on master and here. They should live in an Ansible vault.
-- `slurm_install_nhc: yes` with the default NHC config; the comment in the
-  example recommends a site `nhc_config_template`.
-- `slurm_enable_monitoring: true` but `[slurm-metric]` is empty (kosmos is
-  commented out), so Prometheus/Grafana/Alertmanager have no target host and
-  only the node/dcgm exporters get deployed.
+- Decisions, not defects: NHC runs with the role's default `nhc.conf`
+  template (the example recommends a site `nhc_config_template`), and
+  `slurm_enable_monitoring: true` with an empty `[slurm-metric]` group means
+  only the node and dcgm exporters are deployed, no Prometheus, Grafana or
+  Alertmanager. Both match what the nodes run today.
