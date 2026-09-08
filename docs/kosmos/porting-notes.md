@@ -491,9 +491,8 @@ area has several leftovers that need a decision (update or remove).
 
 ### Spack and modules (chunk 4d, not ported)
 
-- `roles/motd/templates/00-header.yml.j2` tells users "Loading of modules
-  can be done using 'spack'", but Spack is not installed anywhere. Either
-  remove the line or roll Spack out.
+- Fixed 2026-09-08 (8cd3fc20): the motd header no longer tells users to
+  load modules with 'spack'; Spack is not installed anywhere.
 - Lmod on the nodes is version 6.6 (2016), which is simply Ubuntu 22.04's
   `lmod` package. The upstream `lmod` role installs that same package on
   Debian-family hosts, so the first run changes nothing here (checked
