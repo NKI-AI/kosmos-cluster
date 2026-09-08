@@ -1,13 +1,8 @@
 ---
-- hosts: all
+# facts.d on compute nodes. Implicit gather is min (group_vars).
+- hosts: slurm-node
   become: yes
-  pre_tasks:
-    - name: Gather facts from ALL hosts (regardless of limit or tags)
-      setup:
-      delegate_to: "{{ item }}"
-      delegate_facts: True
-      when: hostvars[item]['ansible_default_ipv4'] is not defined
-      with_items: "{{ groups['all'] }}"
+  gather_facts: true
   roles:
     - name: facts
 
@@ -33,9 +28,16 @@
         name: slurm
         tasks_from: build
 
-# Configure slurm.conf on all nodes
+# Configure slurm.conf. Reload ansible_local for every slurm-node first
+# (template walks the whole group). Honor --limit only for who runs the
+# role; facts still come from all compute nodes.
 - hosts: slurm-cluster
   become: yes
+  pre_tasks:
+    - name: Load ansible_local from all slurm-node hosts for slurm.conf
+      include_role:
+        name: facts
+        tasks_from: gather-slurm-nodes
   roles:
     - name: slurm
       vars:

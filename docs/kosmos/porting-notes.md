@@ -121,21 +121,23 @@ identity for free.
   `kvno host/atlas.rhpc.nki.nl` answers "Server
   host/atlas.rhpc.nki.nl@RHPC.NKI.NL not found in Kerberos database", while
   the same request for kosmos and every compute node returns a ticket. DNS
-  is fine (atlas resolves in `rhpc.nki.nl` like the others). Runs that touch
-  atlas need `-k`; the first play of `playbooks/slurm-cluster/slurm.yml`
-  gathers facts from every inventory host, so `-k` is needed there whatever
-  the `--limit`. The fix is to join atlas to the realm (host principal plus
-  keytab, as sssd did on the compute nodes); needs root on atlas and
-  possibly IT. Fallback: a key in your `authorized_keys` on atlas.
+  is fine (atlas resolves in `rhpc.nki.nl` like the others). Runs that
+  touch atlas need `-k`. `--limit gaia` no longer SSHes atlas for facts;
+  the slurm.conf gatherer still SSHes every `slurm-node`, and any play
+  that includes atlas (controller, full `slurm.yml`) still needs `-k`.
+  The fix is to join atlas to the realm (host principal plus keytab, as
+  sssd did on the compute nodes); needs root on atlas and possibly IT.
+  Fallback: a key in your `authorized_keys` on atlas.
 - **kosmos: fixed 2026-09-08.** From 2026-09-04 until then kosmos refused
   admin `-ans` accounts altogether (PAM denied the account with password
-  and Kerberos alike; regular users got in), which blocked `slurm.yml` for
-  everyone because that playbook gathers facts from kosmos. Central IT
-  restored access; Kerberos ssh to kosmos now works like on the compute
-  nodes (`ssh -o PreferredAuthentications=gssapi-with-mic kosmos true`
-  authenticates, and `klist` shows a `host/kosmos.rhpc.nki.nl` ticket). The
-  earlier note that kosmos "rejects the ticket" was this same outage, not a
-  Kerberos problem: kosmos does not need `-k`.
+  and Kerberos alike; regular users got in), which blocked `slurm.yml`
+  because that playbook used to gather facts from every inventory host.
+  Central IT restored access; Kerberos ssh to kosmos now works like on
+  the compute nodes (`ssh -o PreferredAuthentications=gssapi-with-mic
+  kosmos true` authenticates, and `klist` shows a
+  `host/kosmos.rhpc.nki.nl` ticket). The earlier note that kosmos
+  "rejects the ticket" was this same outage, not a Kerberos problem:
+  kosmos does not need `-k`. Fact gathering no longer targets kosmos.
 - **Sudo on the nodes needs a password**: always `-K`. Same password as for
   `-k`.
 - Node home directories are NFS from rhea, shared by all nodes; an
@@ -500,7 +502,8 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   admin login to kosmos, was restored by IT on 2026-09-08; step 6 of
   "Before the first run" is done.)
 - **Ansible node access, not blocking:** atlas has no Kerberos host
-  principal, so every `slurm.yml` run needs `-k`. Join it to the realm
+  principal, so any `slurm.yml` run that includes atlas still needs `-k`.
+  Join it to the realm
   (see "Running playbooks from teuwen-ansible").
 
 ### Maintenance day 2026-10-05
@@ -547,7 +550,8 @@ and Slurm is upgraded. Everything below waits for that day; until then only
    nofile limit on gaia (facts gathering); the first full run of
    `playbooks/slurm-cluster.yml`.
 - **Ansible node access, not blocking:** atlas has no Kerberos host
-  principal, so every `slurm.yml` run needs `-k`. Join it to the realm
+  principal, so any `slurm.yml` run that includes atlas still needs `-k`.
+  Join it to the realm
   (see "Running playbooks from teuwen-ansible").
 - **Decide before the first full run of `playbooks/slurm-cluster.yml`:**
   the monitoring section installs docker-ce on every host, which fails on
@@ -556,10 +560,10 @@ and Slurm is upgraded. Everything below waits for that day; until then only
   NHC and DCGM also targeted atlas and kosmos (4e, fixed); the apptainer role fails
   on gaia and aristarchus, which run newer versions than the pin (4c).
 - **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
-  nvtop builds an unpinned git HEAD (4b); `slurm.yml` gathers facts from every inventory
-  host, and gaia dies on hardware gather (facts gathering).
+  nvtop builds an unpinned git HEAD (4b).
   (The dead per-host overrides in host_vars, 5a, are fixed on this branch:
-  deviation 14.)
+  deviation 14. Fact gathering from `groups['all']` is fixed: see Facts
+  gathering.)
 - **Cleanup when convenient:** everything else below.
 
 ### Slurm role (commit c9d86ffc)
@@ -574,24 +578,25 @@ and Slurm is upgraded. Everything below waits for that day; until then only
 
 ### Facts gathering (commit 00ae45d2)
 
-- `playbooks/slurm-cluster/slurm.yml` first play is `hosts: all` and a
-  pre_task that `setup`s every member of `groups['all']` (so `--limit` still
-  SSHes to atlas and kosmos) when `ansible_default_ipv4` is missing. Adding
-  `run_once` would only stop the loop repeating per host; it would not
-  shrink the host list or skip hardware facts. slurm.conf only needs
-  `ansible_local` (memory, topology, gpus) for each `slurm-node`; gres.conf
-  uses the same facts on that node because `slurm_autodetect_nvml` is
-  false. kosmos is not required. `docs/kosmos/render-slurm-conf.yml` is a
-  blocked-controller helper and is not part of deploy.
-- Intended shape, same as `playbooks/slurm-cluster/create_mounts.yml`
-  already does: implicit gather `min` only (`ansible_gather_subset` at the
-  top of `config/group_vars/slurm-cluster.yml`, not next to NVML);
-  `roles/facts` for `ansible_local`, always refresh, not in the 24 h cache;
-  hardware/network only if a play needs them; `--limit` honored except a
-  `run_once` `setup`/`local` over `groups['slurm-node']` when templating
-  slurm.conf. `ansible_gather_subset: [min]` is in group_vars. NHC
-  `nhc.conf.j2` uses `ansible_local.memory` and no longer loops
-  `ansible_interfaces`. `slurm.yml` still gathers `groups['all']`.
+- `playbooks/slurm-cluster/slurm.yml` used to start with `hosts: all` and a
+  pre_task that `setup`s every member of `groups['all']` when
+  `ansible_default_ipv4` was missing (so `--limit` still SSHes to atlas and
+  kosmos, and a bare `setup:` still ran the mount collector on gaia).
+  **Fixed:** first play is `hosts: slurm-node` with implicit `min` gather
+  and `roles: [facts]`. The configure play (`slurm-cluster`) then
+  `setup`/`local` over `groups['slurm-node']`
+  (`roles/facts/tasks/gather-slurm-nodes.yml`) because the slurm.conf
+  template walks every compute node. That gather still runs under
+  `--limit gaia` (it must). Login is not a facts target.
+  `docs/kosmos/render-slurm-conf.yml` stays a helper and is not part of
+  deploy.
+- Implicit gather `min` is `ansible_gather_subset` in
+  `config/group_vars/slurm-cluster.yml`. Site facts stay in `ansible_local`
+  via `roles/facts` (always refresh on the slurm.conf path, not the 24 h
+  cache). Hardware/network only if a play needs them. NHC `nhc.conf.j2`
+  uses `ansible_local.memory` and no longer loops `ansible_interfaces`.
+  `create_mounts.yml` still does its own explicit `min` `setup`; optional
+  cleanup later.
 
 ### NFS mounts (chunk 4a)
 
@@ -709,10 +714,12 @@ area has several leftovers that need a decision (update or remove).
   only, so let Ansible's 5-minute control sockets expire first). (b) is
   still needed for unfiltered `setup` and ad-hoc `-m setup`. Nothing in
   the repo manages limits today.
-- With (a) in place, `--check` on gaia should get past fact gathering.
+- With (a) in place, `--check` on gaia should get past fact gathering for
+  playbooks that only implicit-gather. `slurm.yml` no longer uses a bare
+  `setup:` over `groups['all']`; its slurm.conf path gathers `local` only.
   A failure that still mentions `udevadm` / `Errno 24` is an explicit
-  `setup` without `min` (or a stale full fact cache); `--flush-cache` once
-  if the cache predates the subset.
+  `setup` without `min`/`local` (or a stale full fact cache); `--flush-cache`
+  once if the cache predates the subset.
 
 ### Top-level playbook wiring (chunk 4e)
 

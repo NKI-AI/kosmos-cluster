@@ -1,0 +1,16 @@
+---
+# ansible_local for every slurm-node (slurm.conf NodeName list). Explicit
+# setup ignores ansible_gather_subset; local skips gaia's mount collector.
+# Always refresh so the 24 h cache does not freeze RealMemory.
+- name: Gather ansible_local from all slurm-node hosts
+  setup:
+    gather_subset:
+      - "!all"
+      - "!min"
+      - local
+    filter:
+      - ansible_local
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  run_once: true
+  loop: "{{ groups['slurm-node'] }}"
