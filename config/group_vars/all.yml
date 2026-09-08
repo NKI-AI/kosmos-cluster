@@ -156,7 +156,16 @@ nvidia_driver_ubuntu_use_open_kernel_modules: false
 #
 # For supported Docker versions, see: submodules/kubespray/roles/container-engine/docker/vars/*
 docker_install: yes
-# docker_version: 'latest'
+# kosmos: pin the container runtime here so the version follows site config
+# rather than whatever kubespray defaults to on the next submodule bump.
+# 28.3 / 1.6.32 are the 26.07 (kubespray 2.31) defaults; the nodes currently
+# run docker-ce 26.1.2 and containerd.io 1.6.28-2, so the first real run
+# upgrades both and restarts the monitoring containers. Note the containerd
+# variable for the docker path is docker_containerd_version, not
+# containerd_version. Supported values:
+#   submodules/kubespray/roles/container-engine/docker/vars/ubuntu.yml
+docker_version: '28.3'
+docker_containerd_version: '1.6.32'
 docker_dns_servers_strict: no
 docker_storage_options: -s overlay2
 #docker_options: "--bip=192.168.99.1/24"

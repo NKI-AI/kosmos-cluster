@@ -241,11 +241,16 @@ the playbook's `when: docker_install | default('yes')` treats as true
   through, restarting docker and with it the exporter containers on the
   nodes that run them. Jobs do not use docker (enroot/apptainer), so the
   impact is the monitoring restart, but it is a version change on every
-  node. The smallest change 26.07 allows is pinning `docker_version: '26.1'`
-  (= 26.1.4, a patch bump from 26.1.2) and `containerd_version: '1.6.32'`
-  (1.6.28 is not in kubespray's table any more) in `config/group_vars/all.yml`.
-  Decision for the admins: pin to the closest versions (same reasoning as
-  the Slurm pin, deviation 7) or accept 28.3. Not changed on the branch yet.
+  node. **Decided 2026-09-08: pin to 28.3** (deviation 13). Site config now
+  sets `docker_version: '28.3'` and `docker_containerd_version: '1.6.32'`,
+  so the version follows site config instead of whatever the next kubespray
+  bump defaults to. Two corrections to the earlier note: the variable the
+  docker role reads is `docker_containerd_version` (default 1.6.32), not
+  `containerd_version`, which belongs to the containerd-as-runtime path and
+  would have done nothing; and `1.6.28` *is* still in kubespray 2.31's table
+  (`container-engine/docker/vars/ubuntu.yml`), so pinning the running
+  versions was available. 28.3 was chosen deliberately, to sit on a
+  supported release rather than to minimise the diff.
 - Side observation from the same survey: on the A6000, A100 and RTX nodes
   the whole CUDA, driver and DCGM stack is on `apt-mark hold` (dozens of
   packages), on gaia only docker, on herakles only leftover 550-series
@@ -332,6 +337,7 @@ ansible-playbook -K --check --diff --limit 'slurm-node:!gaia' \
 | 11 | `roles/requirements.yml`, `config/group_vars/all.yml`, `config/host_vars/{alanturing,hamilton,roentgen}` | upstream `nvidia.nvidia_driver v2.3.1`; `nvidia_driver_branch: "580"` in all.yml, `"550"` in host_vars of the three older nodes | `https://github.com/NKI-AI/ansible-role-nvidia-driver` (master), which is upstream v2.3.1 code with only the default branch changed from 515 to 550 | The fork adds nothing but a default. Live drivers (2026-09-04, all Ubuntu `-server` packages, which is what the role installs): 580 on aristarchus, ptolemaeus, galileo, eudoxus, euctemon, herakles; 550 on alanturing, hamilton, roentgen. Per-host pins are the only setting under which a driver run changes no node; master's single 550 would downgrade six nodes. Flip: set one branch in all.yml and delete the host_vars lines | chunk 5b |
 
 | 12 | `playbooks/slurm-cluster/slurm.yml`, `config/group_vars/slurm-cluster.yml` | the "Add SSH public key to root user authorized keys" task runs only when `slurm_add_root_ssh_key` is true (site config: false) | upstream: unconditional (since 2020) | The play puts the running admin's `~/.ssh/id_rsa.pub` into root's `authorized_keys` on every compute node, and fails when that file does not exist. Neither is wanted here: no playbook logs in as root (Ansible connects as the admin over Kerberos and uses sudo), and the play's purpose, getting past pam_slurm_adopt, does not apply because the admin groups are in `/etc/localgroups`. Flip: set the variable to true and provide a key | chunk 7 |
+| 13 | `config/group_vars/all.yml` | pins `docker_version: '28.3'` and `docker_containerd_version: '1.6.32'` | no pin (the `docker_version` line is commented out), so whatever kubespray defaults to applies | The nine docker nodes run `docker-ce 5:26.1.2` and `containerd.io 1.6.28-2`, installed when the old kubespray defaulted to 26.1; without a pin the version silently follows every submodule bump. 28.3 / 1.6.32 are the 26.07 (kubespray 2.31) defaults. Chosen 2026-09-08 over pinning the running versions (26.1 and 1.6.28 are both still in kubespray's table) so the cluster sits on a supported release rather than the smallest diff. Consequence: the first real run upgrades docker-ce 26.1.2 -> 28.3.3 and containerd.io 1.6.28-2 -> 1.6.32-1 on nine nodes, restarting docker and the exporter containers, so it must run in a scheduled patch window, not on the live cluster. herakles needs `podman-docker` removed first. Note the docker role reads `docker_containerd_version`, not `containerd_version`. Flip: comment both lines out | (this change) |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -630,10 +636,18 @@ area has several leftovers that need a decision (update or remove).
     Consequences: on herakles the install fails, because docker-ce-cli
     neither conflicts with nor replaces podman-docker and dpkg refuses to
     overwrite `/usr/bin/docker`; on gaia and eudoxus (held at 26.1.2)
-    kubespray's pin upgrades docker to 28.3. Decide before the first full
-    run: remove podman-docker from herakles (or docker-ce from the
-    cluster), and whether the docker upgrade is wanted. Until then run the
-    exporter playbooks with `-e docker_install=false` or `--limit`.
+    kubespray's pin upgrades docker to 28.3. **Decided 2026-09-08:** keep
+    docker and the monitoring stack (Grafana dashboards are wanted later),
+    and pin the version (deviation 13). **The config change is prepared, the
+    run is not:** applying it restarts dockerd and with it the node and dcgm
+    exporter containers on nine live nodes, so it belongs in a scheduled
+    patch window, not on a running cluster. Still open: herakles must lose
+    `podman-docker` before it can run the same docker-ce as the other nine,
+    which is what "uniform across the nodes" requires. Until that is done,
+    limit the exporter playbooks with `--limit 'slurm-node:!herakles'`, or
+    skip the docker import with `-e '{"docker_install": false}'` -- note the
+    JSON form: `-e docker_install=false` passes the *string* "false", which
+    the playbook's `when: docker_install | default('yes')` treats as true.
   - The first `--check --diff` run of the new branch against all nodes will
     list these gaps per node; that output is the to-do list for bringing the
     nodes back in line.
@@ -642,7 +656,16 @@ area has several leftovers that need a decision (update or remove).
   this is addressed in `docs/kosmos/slurm-secrets-vaults.md`. Passwords
   should be stored in a vault which all admins have access to.
 - Decisions, not defects: NHC runs with the role's default `nhc.conf`
-  template (the example recommends a site `nhc_config_template`), and
-  `slurm_enable_monitoring: true` with an empty `[slurm-metric]` group means
-  only the node and dcgm exporters are deployed, no Prometheus, Grafana or
-  Alertmanager. Both match what the nodes run today.
+  template (the example recommends a site `nhc_config_template`).
+- **Correction (2026-09-08): the monitoring server side is not inert.** An
+  earlier note said the empty `[slurm-metric]` group means no Prometheus,
+  Grafana or Alertmanager get deployed. That group is never consulted: the
+  top-level playbook passes
+  `hostlist: "{{ slurm_monitoring_group | default('slurm-metric') }}"` and
+  site config sets `slurm_monitoring_group: "slurm-master"`, so a full run
+  installs Prometheus, Grafana, Alertmanager and the slurm exporter on
+  atlas, as docker containers. Whether they run there today is still
+  unverified -- atlas rejects the Kerberos ticket, so the check needs `-k`:
+  `ansible atlas -k -o -m shell -a 'systemctl is-active docker.prometheus.service docker.grafana.service'`.
+  This matters because the node and dcgm exporters only have value if a
+  Prometheus is scraping them.
