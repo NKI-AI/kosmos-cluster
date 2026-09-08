@@ -84,6 +84,15 @@ partition_settings:
     slurm_max_job_timelimit: 30-00
     default: false
 
+################################################################################
+# Ansible facts                                                                #
+################################################################################
+# Implicit gather on this group is control-plane only (OS, Python, pkg-mgr).
+# Hardware/mounts are skipped (gaia NFS crossmnt / nofile). GPU/CPU/memory
+# for slurm.conf and NHC come from ansible_local via roles/facts, not this cache.
+# See docs/kosmos/porting-notes.md.
+ansible_gather_subset:
+  - min
 
 # Auto-detect GPUs using NVML
 # See docs/slurm-cluster/nvml.md for details.
