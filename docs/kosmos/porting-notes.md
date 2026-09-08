@@ -326,6 +326,90 @@ ansible-playbook -K --check --diff --limit 'slurm-node:!gaia' \
   playbooks/container/apptainer.yml
 ```
 
+### 2026-09-08, atlas, kosmos and herakles, `slurm.yml` (`--check --diff`)
+
+First run of the Slurm playbook from the branch (recipe step 6), after
+kosmos access was restored. `ansible-playbook -kK --check --diff --limit
+atlas,kosmos,herakles playbooks/slurm-cluster/slurm.yml`. No failures, no
+unreachable hosts; 13 minutes, 32k log lines. Log:
+`~kosmas-ans/check-slurm.log`. Findings, most important first:
+
+- **A real run would replace the munge key, and only on the hosts in the
+  run. Do not run `slurm.yml` for real on this branch before the vault
+  change (`docs/kosmos/slurm-secrets-vault.md`) is rolled out on all
+  twelve hosts in one run, on 2026-10-05.** The key is
+  `slurm_password | password_hash('sha512', slurm_cluster_name)`. With the
+  old env (ansible-core 2.16, no passlib) that gives the Python `crypt`
+  form, 5000 rounds, `$6$kosmos$...`, which is the key on the nodes today
+  (reproduced locally, byte for byte, from the placeholder password).
+  env-26.07 has passlib 1.7.4 (upstream added it to `scripts/setup.sh` in
+  February 2026, 7f3c71c6) and ansible-core 2.17 prefers it, so the same
+  password now hashes to `$6$rounds=656000$kosmos$...`: a different key.
+  The check shows the change on all three hosts. A limited real run would
+  restart munge with the new key on those hosts and cut them off from the
+  rest. Consequences for the vault rollout: every host in one run, all
+  from env-26.07 (two envs would produce two keys from the same password).
+  Side findings: the current key derives from the public upstream
+  placeholder, so anyone with the DeepOps repo can compute it (another
+  reason for the vault); `playbooks/utilities/user-password.yml` uses the
+  same filter and will produce different hashes from the new env too
+  (harmless: a password hash only has to verify, not match an old one).
+  Not fixed: `rounds=5000` in the template would reproduce today's key,
+  but the key changes with the vault password anyway (decided 2026-09-08).
+- **A real run would reboot every compute node.** `roles/slurm/tasks/compute.yml`
+  adds `GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX} cgroup_enable=memory swapaccount=1"`
+  to `/etc/default/grub` with `lineinfile` (no regexp: the exact line must
+  exist), then runs `update-grub` and `reboot` when the line was added.
+  All ten compute nodes instead carry the expanded form,
+  `GRUB_CMDLINE_LINUX="pci=realloc=off cgroup_enable=memory swapaccount=1"`,
+  twice, and not the role's line (checked on every node 2026-09-08). The
+  kernel already runs with these options, so the reboot would change
+  nothing, but it would hit nodes with running jobs. Task unchanged since
+  23.08 and on master; someone rewrote the file by hand after
+  provisioning. Fix deferred to the maintenance day, see "Maintenance day
+  2026-10-05" in section 2.
+- **Check-mode artifacts, not real changes:** thirty thousand of the log
+  lines are the role "uninstalling" and preparing to rebuild hwloc, pmix
+  and Slurm on all three hosts (remove build trees under
+  `/opt/kosmos-cluster/build`, remove `/usr/local/lib/slurm`, stop all
+  Slurm services). The version-check commands (`slurmd --version`,
+  `hwloc-info --version`, ...) are skipped in check mode, so the "already
+  installed" shortcut never fires; same mechanism as in the NHC role. All
+  three hosts run Slurm 23.02.4 with hwloc and pmix built under
+  `/opt/kosmos-cluster` (verified on kosmos and herakles), so a real run
+  builds nothing. What a real run does do, by upstream design and on
+  master too: the "configure slurm.conf on all nodes" play runs the
+  misc-node tasks on every host, which stop and disable slurmctld, slurmd
+  and slurmdbd; the controller and compute plays then restart and re-enable
+  them. So a full `slurm.yml` run always restarts slurmctld and slurmdbd on
+  atlas and slurmd on every node in the run.
+- **slurm.conf** (rendered on atlas into `/sw/.slurm`, and the same diff on
+  `/etc/slurm/slurm.conf` of all three hosts): `KillWait` 30 to 120
+  (deviation 3); the four phased-out NodeName lines gone; partition table
+  in the order of `partition_settings` (deviation 14); aristarchus
+  RealMemory 980306 to 980304 and gaia 489970 to 489957 (custom memory
+  fact, 95 % of MemTotal, drifts a few MB across boots); gaia's line gains
+  `Procs=128`, which the 2025-12 render lacked. Nothing else.
+- **herakles, first-run changes:** `pam_systemd.so` commented out in
+  `/etc/pam.d/common-session` (pam_slurm_adopt requirement, done on the
+  other nodes long ago); `/etc/localusers` and its backup rewritten;
+  `epilog.d/50-exclusive-gpu` updated to the 26.07 version (`nvidia-smi
+  pmon` parsing); `linux-tools-5.15.0-191-generic` installed.
+- **kosmos:** the distro `libhwloc-dev` and `libpmix-dev` would be removed
+  (the role removes them before using its own builds; unconditional on
+  Ubuntu). Header packages only.
+- **All three:** recursive `chmod 0755` of `/opt/kosmos-cluster` ("fix
+  deepops dir permissions", upstream, always reports changed in check
+  mode).
+- `/etc/localusers` is templated from `SUDO_USER`, so it names whoever
+  ran the playbook last (joren-ans today, kosmas-ans after a run). It is
+  the pam_listfile of users allowed to ssh without a job; admins are
+  covered by `/etc/localgroups` regardless, so this is cosmetic.
+- Why 13 minutes for three hosts: check mode diffs every file of the build
+  trees it pretends to delete, and the recursive chmod walks the same
+  trees; both on three hosts. Expect a full twelve-host check run to take
+  proportionally longer; a real run has neither.
+
 ## 1. Conscious deviations from master
 
 | # | Where | Branch does | Master does | Why | Commit |
@@ -408,12 +492,60 @@ issues were removed; corrections are marked "corrected 2026-09-08".
 
 **By priority:**
 
-- **Blocking the first Slurm run:** nothing since 2026-09-08. Admin login
-  to kosmos was restored by IT (see "Running playbooks from
-  teuwen-ansible"); the missing default partition, 5a, is fixed on this
-  branch; herakles turned out to be a normal node with two playbooks never
-  run against it, 5b. Next: step 6 of "Before the first run" (`slurm.yml`
-  in check mode against atlas, kosmos and one compute node).
+- **Blocking a real run of `slurm.yml`: the munge key.** env-26.07 hashes
+  `slurm_password` differently from the old env, so any real run rewrites
+  the munge key on the hosts it touches and cuts them off from the rest
+  (see "Check-run results", 2026-09-08). Resolved by the vault rollout on
+  the maintenance day, below. Check runs are unaffected. (Earlier blocker,
+  admin login to kosmos, was restored by IT on 2026-09-08; step 6 of
+  "Before the first run" is done.)
+- **Ansible node access, not blocking:** atlas has no Kerberos host
+  principal, so every `slurm.yml` run needs `-k`. Join it to the realm
+  (see "Running playbooks from teuwen-ansible").
+
+### Maintenance day 2026-10-05
+
+Decided 2026-09-08: no playbook run or hand edit that changes live node
+configuration before the maintenance day, on which the branch goes live
+and Slurm is upgraded. Everything below waits for that day; until then only
+`--check --diff` runs and branch/doc work. Order matters.
+
+1. **Fix `/etc/default/grub` on all ten compute nodes so the Slurm role
+   finds its line and stops rebooting nodes.** Today each node has
+   `GRUB_CMDLINE_LINUX="pci=realloc=off cgroup_enable=memory swapaccount=1"`
+   twice (hand-written, expanded form). Replace both lines with
+   ```
+   GRUB_CMDLINE_LINUX="pci=realloc=off"
+   GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX} cgroup_enable=memory swapaccount=1"
+   ```
+   (second line verbatim: it is the `lineinfile` string in
+   `roles/slurm/tasks/compute.yml`), then `update-grub`. The effective
+   kernel command line is unchanged, so no reboot is needed for this step
+   itself; the nodes reboot anyway that day. Before editing, confirm the
+   exact current lines on every node (`grep GRUB_CMDLINE_LINUX
+   /etc/default/grub`; only the cgroup option count was checked so far)
+   and that `/proc/cmdline` shows the same options. Verify afterwards with
+   `ansible-playbook -kK --check --diff --limit slurm-node
+   playbooks/slurm-cluster/slurm.yml`: the "add cgroups to grub options"
+   task must report ok on every node. Plan: a one-off play in
+   `docs/kosmos/` (replace the two lines, `update-grub`, show the grub.cfg
+   diff), run in check mode first. Alternative rejected: a site variable
+   that skips the grub tasks would also skip them on future new nodes.
+2. **Vault password and munge key rollout** per
+   `docs/kosmos/slurm-secrets-vault.md`: all twelve hosts in one
+   `slurm.yml` run from env-26.07, check run first, then `sinfo` and a
+   munge round trip from atlas. This is the first real run of `slurm.yml`
+   from the branch; expect the changes listed under "Check-run results",
+   2026-09-08 (herakles first-run items, kosmos dev packages, slurmctld,
+   slurmdbd and slurmd restarts).
+3. **Slurm upgrade** (23.02 -> stepped; branch `slurm-upgrade-26.04` on
+   origin), after the branch is live.
+4. Other items that touch live nodes and are waiting for this day:
+   herakles driver metapackages and reboot (Check-run results,
+   2026-09-04); podman-docker vs docker-ce on herakles and the docker
+   upgrade on gaia and eudoxus (5b); apptainer pin and version drift (4c);
+   nofile limit on gaia (facts gathering); the first full run of
+   `playbooks/slurm-cluster.yml`.
 - **Ansible node access, not blocking:** atlas has no Kerberos host
   principal, so every `slurm.yml` run needs `-k`. Join it to the realm
   (see "Running playbooks from teuwen-ansible").
