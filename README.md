@@ -20,6 +20,23 @@
 > Then run playbooks with `-K` (sudo on the nodes needs a password). Each admin works from
 > their own clone (home directory or wherever), pulls the latest changes before running
 > playbooks, and submits their own changes as pull requests.
+>
+> **Adding or removing a compute node.** Everything lives in `config/`:
+>
+> - `config/inventory`: list the host under `[all]` (with `ansible_host=`), under
+>   `[slurm-node]`, under exactly one `[partition_<name>]` group, and under
+>   `[scratch-node]` if it has a local scratch disk. To remove a node, comment it out
+>   in those places, as done for the phased-out nodes.
+> - `config/group_vars/slurm-cluster.yml`, `partition_settings`: only for a new
+>   partition (default memory per CPU, CPUs per GPU, time limit, QoS). Partition
+>   settings apply to every node in the partition; Slurm has no per-node override.
+> - `config/host_vars/<host>`: only if the node needs something different from the
+>   rest, such as a driver branch pin (`nvidia_driver_branch`) or a `gpu_topology`
+>   override. Most nodes need no file.
+>
+> `slurm.conf` is rendered from these on the controller by
+> `playbooks/slurm-cluster/slurm.yml`; `docs/kosmos/render-slurm-conf.yml` renders it
+> locally so the result can be checked before a run.
 
 Infrastructure automation tools for Kubernetes and Slurm clusters with NVIDIA GPUs.
 

@@ -1,5 +1,3 @@
 ---
-slurm_partition_name: rtx2080ti
-slurm_def_mem_per_cpu: 5700
 # kosmos: this node runs the 550 driver branch (see docs/kosmos/porting-notes.md)
 nvidia_driver_branch: "550"

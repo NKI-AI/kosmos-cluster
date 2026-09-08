@@ -30,11 +30,13 @@ slurm_cluster_name: kosmos
 slurm_password: ReplaceWithASecurePasswordInTheVault
 slurm_db_password: AlsoReplaceWithASecurePasswordInTheVault
 
-slurm_max_job_timelimit: 10080
 slurm_default_job_timelimit: 60
 slurm_grace_time: 120  # time in seconds to allow for job cleanup
 
-# Partition settings, individual nodes can overwrite settings in host_vars
+# Slurm partitions. Membership comes from the partition_<name> groups in
+# config/inventory; the settings below apply to the whole partition (Slurm has
+# no per-node form of DefMemPerCPU or MaxTime, so host_vars cannot override
+# them). A partition is written to slurm.conf only if its group has hosts.
 partition_settings:
   a100:
     slurm_def_mem_per_cpu: 7000

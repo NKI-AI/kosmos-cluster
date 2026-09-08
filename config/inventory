@@ -99,6 +99,40 @@ hamilton
 gaia
 herakles
 
+# Slurm partitions: one partition_<name> group per partition. Settings per
+# partition are in group_vars/slurm-cluster.yml under partition_settings;
+# a partition is written to slurm.conf only if its group has hosts. To add
+# a node, list it under [slurm-node] and under exactly one group here.
+[partition_a100]
+euctemon
+eudoxus
+
+[partition_h100]
+herakles
+
+[partition_a6000]
+aristarchus
+galileo
+ptolemaeus
+
+[partition_rtx2080ti]
+alanturing
+hamilton
+
+[partition_rtx2080ti_sm]
+# carlos                                                    Phased out
+# plato
+# schrodinger
+
+[partition_p6000]
+# mariecurie                                                Phased out
+
+[partition_rtx8000]
+roentgen
+
+[partition_cpu]
+gaia
+
 [slurm-cluster:children]
 slurm-master
 slurm-node

@@ -338,6 +338,7 @@ ansible-playbook -K --check --diff --limit 'slurm-node:!gaia' \
 
 | 12 | `playbooks/slurm-cluster/slurm.yml`, `config/group_vars/slurm-cluster.yml` | the "Add SSH public key to root user authorized keys" task runs only when `slurm_add_root_ssh_key` is true (site config: false) | upstream: unconditional (since 2020) | The play puts the running admin's `~/.ssh/id_rsa.pub` into root's `authorized_keys` on every compute node, and fails when that file does not exist. Neither is wanted here: no playbook logs in as root (Ansible connects as the admin over Kerberos and uses sudo), and the play's purpose, getting past pam_slurm_adopt, does not apply because the admin groups are in `/etc/localgroups`. Flip: set the variable to true and provide a key | chunk 7 |
 | 13 | `config/group_vars/all.yml` | pins `docker_version: '28.3'` and `docker_containerd_version: '1.6.32'` | no pin (the `docker_version` line is commented out), so whatever kubespray defaults to applies | The nine docker nodes run `docker-ce 5:26.1.2` and `containerd.io 1.6.28-2`, installed when the old kubespray defaulted to 26.1; without a pin the version silently follows every submodule bump. 28.3 / 1.6.32 are the 26.07 (kubespray 2.31) defaults. Chosen 2026-09-08 over pinning the running versions (26.1 and 1.6.28 are both still in kubespray's table) so the cluster sits on a supported release rather than the smallest diff. Consequence: the first real run upgrades docker-ce 26.1.2 -> 28.3.3 and containerd.io 1.6.28-2 -> 1.6.32-1 on nine nodes, restarting docker and the exporter containers, so it must run in a scheduled patch window, not on the live cluster. herakles needs `podman-docker` removed first. Note the docker role reads `docker_containerd_version`, not `containerd_version`. Flip: comment both lines out | (this change) |
+| 14 | `config/inventory`, `config/host_vars/*`, `config/group_vars/slurm-cluster.yml`, `roles/slurm/templates/etc/slurm/slurm.conf` | partition membership is an inventory group per partition (`partition_a100` etc.); the template loops over `partition_settings` and takes each partition's nodes from `groups`; the `MaxTime` guard tests the partition value it prints; eight host_vars files that only named a partition are deleted and the dead keys removed from the other six; the unused top-level `slurm_max_job_timelimit` is gone | master: `slurm_partition_name` in every host's host_vars, next to `slurm_def_mem_per_cpu` and (five hosts) `slurm_max_job_timelimit`, which nothing reads; the template builds the partition-to-node map with Jinja dict tricks under `# TODO create this as a fact`; the `MaxTime` guard tested the top-level variable, so deleting that line would have made every partition `MaxTime=INFINITE` | The per-host memory and time-limit values were the first draft of the site config (f81872c5, 2024-06-03), superseded the same day by `partition_settings` (a99cfa0d) and never read since; Slurm has no per-node form of either setting, so they could not have been honoured. Membership as inventory groups shows the whole layout in one file and removes the template TODO. Rendered slurm.conf before and after (2026-09-08, `docs/kosmos/render-slurm-conf.yml`): every `PartitionName` line identical apart from partition order (now the order of `partition_settings`) and node order within a6000 (now alphabetical). Flip: `git checkout master -- config/host_vars roles/slurm/templates/etc/slurm/slurm.conf`, delete the `partition_*` groups and re-add the dead keys | 2026-09-08 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -407,18 +408,17 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   NHC and DCGM also targeted atlas and kosmos (4e, fixed); the apptainer role fails
   on gaia and aristarchus, which run newer versions than the pin (4c).
 - **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
-  dead per-host overrides in host_vars silently ignored (5a); nvtop builds an
-  unpinned git HEAD (4b); `slurm.yml` gathers facts from every inventory
+  nvtop builds an unpinned git HEAD (4b); `slurm.yml` gathers facts from every inventory
   host, and gaia dies on hardware gather (facts gathering).
+  (The dead per-host overrides in host_vars, 5a, are fixed on this branch:
+  deviation 14.)
 - **Cleanup when convenient:** everything else below.
 
 ### Slurm role (commit c9d86ffc)
 
-- `roles/slurm/templates/etc/slurm/slurm.conf` carries
-  `# TODO create this as a fact` (joren, 2024-06-04): the partition-to-nodes
-  map is built with Jinja dict tricks inside the template. Computing it in
-  Ansible (`set_fact`) would be cleaner. Do it only once the branch can render
-  slurm.conf, so byte-identical output can be proven.
+- Fixed 2026-09-08 (deviation 14): the `# TODO create this as a fact` block
+  (joren, 2024-06-04) that built the partition-to-nodes map with Jinja dict
+  tricks is gone; the template reads the `partition_<name>` inventory groups.
 - `roles/slurm/templates/etc/localgroups` (admin groups `sudo`,
   `teuwen-sudoers`) and `prolog.d/50-create-scratch` (`/processing` path)
   hardcode site values inside the role, as on master. Candidates for
@@ -605,18 +605,21 @@ area has several leftovers that need a decision (update or remove).
   the old default: the smallest GPU partition, so a forgotten `-p` lands
   somewhere cheap. Tell users, and update any documentation that names the
   default partition, before the first real Slurm run.
-- `slurm_def_mem_per_cpu` and `slurm_max_job_timelimit` in
-  `config/host_vars/*` are dead: the slurm.conf template reads both only
-  from `partition_settings[<partition>]`. gaia (1900 vs 1000), galileo
-  (3800 vs 7000, 20160 vs 10080), ptolemaeus (20160 vs 10080) and hamilton
-  (6000 vs 5700) differ from their partition, so someone intended per-host
-  overrides that never took effect. The comment above `partition_settings`
-  in `config/group_vars/slurm-cluster.yml` ("individual nodes can overwrite
-  settings in host_vars") is therefore wrong too. Either drop the host
-  values or make the template honour them.
-- `config/host_vars/{carlos,mariecurie,plato,schrodinger}` (with their
-  `gpu_topology` overrides) describe phased-out nodes; remove once the nodes
-  are gone for good.
+- **Fixed 2026-09-08 (deviation 14), still present on master:**
+  `slurm_def_mem_per_cpu` and `slurm_max_job_timelimit` in
+  `config/host_vars/*` were dead: the slurm.conf template reads both only
+  from `partition_settings[<partition>]`, and Slurm has no per-node form of
+  either (galileo's 3800 could never differ from the 7000 of its a6000
+  partition mates). They were the first draft of the site config
+  (f81872c5), superseded the same day by `partition_settings`. The comment
+  above `partition_settings` ("individual nodes can overwrite settings in
+  host_vars") was wrong for the same reason. On this branch the keys are
+  gone, partition membership is an inventory group per partition, and the
+  README describes how to add or remove a node.
+- `config/host_vars/{carlos,plato,schrodinger}` (now only their
+  `gpu_topology` overrides) and the commented hosts in the
+  `partition_rtx2080ti_sm` and `partition_p6000` inventory groups describe
+  phased-out nodes; remove once the nodes are gone for good.
 
 ### Site config (chunk 5b)
 
