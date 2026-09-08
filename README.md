@@ -13,6 +13,10 @@
 > ansible-galaxy install -r roles/requirements.yml
 > ```
 >
+> ssh to the nodes uses your Kerberos ticket, no keys. It expires after about a day: if
+> `klist` shows nothing or Ansible reports every host `UNREACHABLE ... Permission denied`,
+> run `kinit` and retry.
+>
 > Then run playbooks with `-K` (sudo on the nodes needs a password). Each admin works from
 > their own clone (home directory or wherever), pulls the latest changes before running
 > playbooks, and submits their own changes as pull requests.
