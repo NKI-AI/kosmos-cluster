@@ -330,7 +330,7 @@ ansible-playbook -K --check --diff --limit 'slurm-node:!gaia' \
 | 4 | `playbooks/slurm-cluster/slurm.yml` | keeps `roles: [facts]` in the first play, in addition to the fact-gathering pre_task | removed the role, keeps only the pre_task | The role installs the custom fact scripts (`topology`, `memory`, `gpus`) that slurm.conf needs. Master relies on other playbooks having installed them. On existing nodes the role is a no-op (scripts unchanged since 23.08). Flip: delete the `roles:` block | 00ae45d2 |
 | 5 | `roles/spack.environment`, `playbooks/slurm-cluster/spack-modules.yml`, `roles/spack/defaults/main.yml` | untouched upstream (no spack.environment role, upstream spack-modules.yml, upstream spack pin v1.2.0) | adds a role that installs Spack profile scripts on all hosts plus zsh support, a play for it in spack-modules.yml, and pins spack v0.20.2 with gcc/gfortran deps (EricMarcus-ai and joren, June 2024) | Spack was never rolled out: `/sw` (shared NFS) has no spack directory, no node has `/etc/profile.d/z00_spack.*`, `spack` is not on the path, and `slurm_install_spack` is `false` in config so the play never runs. Confirmed with the admin that nobody uses Spack. Flip: `git checkout master -- roles/spack.environment playbooks/slurm-cluster/spack-modules.yml` and set `spack_version`/`spack_ubuntu_deps` in group_vars (upstream already has gcc/gfortran) | (not applied, chunk 4d) |
 | 6 | `config/group_vars/slurm-cluster.yml` | `slurm_cluster_install_singularity: no` | `yes` | Apptainer replaced Singularity on the nodes (chunk 4c) and upstream's singularity playbook is broken in 26.07 (`abims_sbr.singularity` dropped from requirements). Flip: set `yes` (and expect the playbook to fail) | chunk 5b |
-| 7 | `config/group_vars/slurm-cluster.yml` | `slurm_version: "23.02.4"` pinned | no pin in config (master pinned it in `roles/slurm/defaults`) | Upstream 26.07 defaults to 26.05.1. Slurm supports upgrading at most two major versions at once, so 23.02 -> 26.05 must be stepped; a Slurm upgrade is a separate project. Flip: remove the pin | chunk 5b |
+| 7 | `config/group_vars/slurm-cluster.yml` | `slurm_version: "23.02.4"` pinned | no pin in config (master pinned it in `roles/slurm/defaults`) | Upstream 26.07 defaults to 26.05.1. Slurm 24.11+ accepts upgrades from the three previous major releases, so 23.02 -> 26.05 takes two hops (24.11.7, then 26.05.4). The pin is bumped one hop at a time by the procedure in `docs/kosmos/slurm-upgrade.md`; `playbooks/slurm-cluster/slurm-upgrade.yml` refuses any other value. Flip: n/a, the pin is the upgrade mechanism | chunk 5b, 2026-09-08 |
 | 8 | `config/group_vars/slurm-cluster.yml` | `slurm_default_group`, `slurm_organization_name`, `slurm_install_spack` removed | defines them | No role or playbook on either branch reads the first two; the third follows from deviation 5. Flip: re-add the lines | chunk 5b |
 | 9 | `config/group_vars/all.yml` | rebuilt from the 26.07 `config.example` with the four site values (DNS, timezone, extra packages, `deepops_dir`) | 23.08 example with the same four values | Master's file was otherwise untouched 23.08 example text; the 26.07 example adds the driver branch and open-kernel-module knobs and updates MAAS/NGC defaults. Flip: `git checkout master -- config/group_vars/all.yml` | chunk 5b |
 | 10 | `config/group_vars/all.yml` | `users: []` | example `users:` block defining an `nvidia` sudo user with a published password hash | Nothing in the Slurm flow runs the users role and no node has that user, but a sudo account with a public hash should not sit in site config. Flip: restore the block | chunk 5b |
@@ -338,6 +338,9 @@ ansible-playbook -K --check --diff --limit 'slurm-node:!gaia' \
 
 | 12 | `playbooks/slurm-cluster/slurm.yml`, `config/group_vars/slurm-cluster.yml` | the "Add SSH public key to root user authorized keys" task runs only when `slurm_add_root_ssh_key` is true (site config: false) | upstream: unconditional (since 2020) | The play puts the running admin's `~/.ssh/id_rsa.pub` into root's `authorized_keys` on every compute node, and fails when that file does not exist. Neither is wanted here: no playbook logs in as root (Ansible connects as the admin over Kerberos and uses sudo), and the play's purpose, getting past pam_slurm_adopt, does not apply because the admin groups are in `/etc/localgroups`. Flip: set the variable to true and provide a key | chunk 7 |
 | 13 | `config/group_vars/all.yml` | pins `docker_version: '28.3'` and `docker_containerd_version: '1.6.32'` | no pin (the `docker_version` line is commented out), so whatever kubespray defaults to applies | The nine docker nodes run `docker-ce 5:26.1.2` and `containerd.io 1.6.28-2`, installed when the old kubespray defaulted to 26.1; without a pin the version silently follows every submodule bump. 28.3 / 1.6.32 are the 26.07 (kubespray 2.31) defaults. Chosen 2026-09-08 over pinning the running versions (26.1 and 1.6.28 are both still in kubespray's table) so the cluster sits on a supported release rather than the smallest diff. Consequence: the first real run upgrades docker-ce 26.1.2 -> 28.3.3 and containerd.io 1.6.28-2 -> 1.6.32-1 on nine nodes, restarting docker and the exporter containers, so it must run in a scheduled patch window, not on the live cluster. herakles needs `podman-docker` removed first. Note the docker role reads `docker_containerd_version`, not `containerd_version`. Flip: comment both lines out | (this change) |
+| 13 | `roles/slurm/templates/etc/slurm/cgroup.conf` | no `CgroupAutomount` line | upstream and master: `CgroupAutomount=yes` | Removed from Slurm in 23.11; 24.11 and 26.05 still parse it but log `The option "CgroupAutomount" is defunct` on every slurmd start. No behaviour change on 23.02 (cgroup v2 is auto-mounted by systemd). Flip: re-add the line | 2026-09-08 |
+| 14 | `roles/slurm/templates/etc/slurm/slurm.conf` | `PriorityType=priority/basic` explicit | `#PriorityType=priority/multifactor` (commented, so the Slurm default applies) | The default flipped from `priority/basic` to `priority/multifactor` in Slurm 23.11. The live cluster runs `priority/basic` (FIFO); pinning it keeps scheduling order unchanged across the upgrade. Decision 2026-09-08. Flip: switch to multifactor deliberately, with weights | 2026-09-08 |
+| 15 | `roles/slurm/templates/etc/slurm/slurm.conf` | `SlurmctldTimeout`/`SlurmdTimeout` come from `slurm_slurmctld_timeout` / `slurm_slurmd_timeout` (defaults 120/300, the upstream values); `SwitchType=switch/none`, `JobCompType=jobcomp/none` and the two `#JobCredential*` comment lines removed | hardcoded 120/300; the three lines present | The upgrade playbook raises the timeouts to 3600 while daemons restart (SchedMD procedure) and restores them by re-rendering. The `none` plugins were removed in 23.11; the parser silently drops any `*Type=*/none` value (`read_config.c`), so removing the lines changes nothing. Rendered output is byte-identical except `PriorityType` (row 14). Flip: hardcode the numbers again | 2026-09-08 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -374,6 +377,9 @@ Changes the upgrade brings that we accept rather than pin back. Also listed
 in the table above where a flip is possible.
 
 - `KillWait` 30 -> 120 (see deviation 3).
+- `PriorityType=priority/basic` is now explicit (deviation 14): no change on
+  23.02, but without it the 24.11 upgrade would have switched the cluster to
+  multifactor priorities.
 - `nvidia-dcgm-exporter` container image: `2.1.8-2.4.0-rc.2-ubuntu20.04` ->
   `4.5.3-4.8.2-distroless` (role default; monitoring is enabled).
 - `standalone-container-registry` image `registry:2.8` -> `3.1.1` and
@@ -653,8 +659,21 @@ area has several leftovers that need a decision (update or remove).
     nodes back in line.
 - `slurm_password` / `slurm_db_password` are still the upstream placeholder
   strings, on master and here. They should live in an Ansible vault. **NOTE**:
-  this is addressed in `docs/kosmos/slurm-secrets-vaults.md`. Passwords
-  should be stored in a vault which all admins have access to.
+  this is addressed in `docs/kosmos/slurm-secrets-vault.md`. Passwords
+  should be stored in a vault which all admins have access to. Mind the
+  munge-key coupling described there: `playbooks/slurm-cluster/slurm-upgrade.yml`
+  refuses to run when the live munge key is not derived from the current
+  `slurm_password`.
+- **Slurm upgrade (planned, 2026-09-08):** 23.02.4 -> 24.11.7 -> 26.05.4 with
+  `playbooks/slurm-cluster/slurm-upgrade.yml` (backup, SchedMD order,
+  foreground database conversion) after `slurm-backup.yml`. Procedure,
+  caveats, user-visible changes and rollback: `docs/kosmos/slurm-upgrade.md`.
+  Two site additions come with it: MariaDB tuning for slurmdbd in
+  `/etc/mysql/mariadb.conf.d/99-slurmdbd.cnf` (written by the preflight,
+  applied by a MariaDB restart while slurmdbd is stopped) and backups under
+  `/var/backups/slurm` on atlas plus a copy under `~/slurm-backups` on the
+  Ansible node. Hop 2 needs the kosmos client commands on 24.11 first, so it
+  waits for admin access to kosmos.
 - Decisions, not defects: NHC runs with the role's default `nhc.conf`
   template (the example recommends a site `nhc_config_template`).
 - **Correction (2026-09-08): the monitoring server side is not inert.** An

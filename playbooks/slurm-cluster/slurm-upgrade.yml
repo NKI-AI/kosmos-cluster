@@ -1,0 +1,1015 @@
+---
+# Upgrade Slurm on the KOSMOS cluster by ONE major release hop, live (jobs
+# keep running), in the order SchedMD requires: backup -> slurmdbd ->
+# slurmctld -> slurmd -> login node. Read docs/kosmos/slurm-upgrade.md first;
+# it explains every step, the expected durations and the rollback.
+#
+# Procedure per hop (see the doc for the prechecks):
+#   1. bump slurm_version in config/group_vars/slurm-cluster.yml, commit
+#   2. kinit
+#   3. dry run of the checks only:
+#      ansible-playbook -kK --check --diff --tags preflight playbooks/slurm-cluster/slurm-upgrade.yml
+#   4. canary (controller + one node):
+#      ansible-playbook -kK --diff --limit 'slurm-master,alanturing' playbooks/slurm-cluster/slurm-upgrade.yml
+#   5. the rest (nodes already upgraded are skipped):
+#      ansible-playbook -kK --diff playbooks/slurm-cluster/slurm-upgrade.yml
+#   Resume after a failure on the nodes:        --tags compute,finish
+#   Restore the raised timeouts by hand:        --tags finish
+#   Skip the login node (hop 1 only):           -e slurm_upgrade_login=false
+#
+# -k: atlas (and kosmos) take a password, not the Kerberos ticket. -K: sudo.
+#
+# What it refuses: a target outside the SchedMD upgrade window, a
+# slurm_version that differs from the group_vars pin, mixed installed
+# versions, a munge key that does not match slurm_password, and --check for
+# everything but the preflight.
+#
+# Never define a variable called plain `slurm_upgrade`: roles/slurm/tasks/
+# build.yml sets a fact with that name.
+
+##############################################################################
+# Play 0: probe the compute and login nodes (custom facts + installed version)
+##############################################################################
+- name: Probe compute nodes
+  hosts: slurm-node
+  become: yes
+  gather_facts: no
+  any_errors_fatal: true
+  tags: [always]
+  tasks:
+    # Only the custom facts (topology, memory, gpus) that slurm.conf needs.
+    # Hardware facts are skipped on purpose: they fail on gaia (porting notes).
+    - name: gather custom facts
+      setup:
+        gather_subset: ['!all', '!min', 'local']
+
+    - name: read the installed Slurm version
+      command: "{{ slurm_install_prefix }}/sbin/slurmd --version"
+      register: slurm_upgrade_slurmd_version
+      changed_when: false
+      check_mode: false
+
+    - name: record the installed version
+      set_fact:
+        slurm_installed_version: "{{ slurm_upgrade_slurmd_version.stdout | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+
+    - name: check cgroup v2 and the shared slurm.conf symlink
+      stat:
+        path: "{{ item }}"
+      loop:
+        - /sys/fs/cgroup/cgroup.controllers
+        - "{{ slurm_config_dir | default('/etc/slurm') }}/slurm.conf"
+      register: slurm_upgrade_node_stat
+
+    - name: refuse nodes that are not on cgroup v2 or do not use the shared slurm.conf
+      assert:
+        that:
+          - slurm_upgrade_node_stat.results[0].stat.exists
+          - slurm_upgrade_node_stat.results[1].stat.islnk | default(false)
+          - slurm_upgrade_node_stat.results[1].stat.lnk_source == (slurmctl_config_dir | default('/sw/.slurm')) ~ '/slurm.conf'
+        fail_msg: "{{ inventory_hostname }}: expected cgroup v2 and /etc/slurm/slurm.conf -> /sw/.slurm/slurm.conf (slurm_conf_symlink)."
+
+- name: Probe the login node (may be unreachable, see porting notes)
+  hosts: slurm-login
+  become: no
+  gather_facts: no
+  ignore_unreachable: true
+  tags: [always]
+  tasks:
+    - name: read the installed client version
+      command: "{{ slurm_install_prefix }}/bin/sinfo --version"
+      register: slurm_upgrade_login_version_cmd
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: record the installed version
+      set_fact:
+        slurm_installed_version: "{{ slurm_upgrade_login_version_cmd.stdout | default('') | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+      when: slurm_upgrade_login_version_cmd.rc | default(1) == 0
+
+##############################################################################
+# Play 1: preflight on the controller
+##############################################################################
+- name: Preflight on the controller
+  hosts: slurm-master
+  become: yes
+  any_errors_fatal: true
+  tags: [preflight]
+  tasks:
+    # Also tagged compute: a resume with --tags compute,finish re-raises the
+    # timeouts (last tasks of this play) and needs these variables.
+    - name: apply upgrade defaults
+      tags: [preflight, compute]
+      set_fact:
+        slurm_upgrade_windows: "{{ slurm_upgrade_windows | default({'24.11': ['23.02', '23.11', '24.05'], '25.05': ['23.11', '24.05', '24.11'], '25.11': ['24.05', '24.11', '25.05'], '26.05': ['24.11', '25.05', '25.11']}) }}"
+        slurm_upgrade_timeout_raise: "{{ slurm_upgrade_timeout_raise | default(3600) }}"
+        slurm_upgrade_confirm_conf_diff: "{{ slurm_upgrade_confirm_conf_diff | default(false) }}"
+        slurm_upgrade_login: "{{ slurm_upgrade_login | default(true) }}"
+        slurm_upgrade_login_version_ack: "{{ slurm_upgrade_login_version_ack | default('') }}"
+        slurm_src_cache_dir: "{{ slurm_src_cache_dir | default(deepops_dir ~ '/build/src') }}"
+        slurm_src_sha256: "{{ slurm_src_sha256 | default('') }}"
+        slurm_mariadb_tune: "{{ slurm_mariadb_tune | default(true) }}"
+        slurm_mariadb_lock_wait_timeout: "{{ slurm_mariadb_lock_wait_timeout | default(900) }}"
+        slurm_mariadb_max_allowed_packet: "{{ slurm_mariadb_max_allowed_packet | default('16M') }}"
+        slurm_backup_dir: "{{ slurm_backup_dir | default('/var/backups/slurm') }}"
+
+    - name: load slurm role defaults and OS variables
+      tags: [preflight, compute]
+      include_role:
+        name: slurm
+        tasks_from: setup-role
+        public: yes
+
+    - name: read the pinned version from config/group_vars/slurm-cluster.yml
+      set_fact:
+        slurm_pinned_version: "{{ (lookup('file', playbook_dir ~ '/../../config/group_vars/slurm-cluster.yml') | from_yaml).slurm_version }}"
+
+    - name: refuse a slurm_version that is not the group_vars pin
+      assert:
+        that:
+          - slurm_version == slurm_pinned_version
+          - slurm_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+          - not (slurm_force_rebuild | bool)
+        fail_msg: >-
+          slurm_version is {{ slurm_version }} but config/group_vars/slurm-cluster.yml pins {{ slurm_pinned_version }}
+          (or slurm_force_rebuild is set). Bump the pin in git and rerun; do not pass -e slurm_version.
+
+    - name: read the installed Slurm version on the controller
+      command: "{{ slurm_install_prefix }}/sbin/slurmd --version"
+      register: slurm_upgrade_ctl_version
+      changed_when: false
+      check_mode: false
+
+    - name: work out installed and target major versions
+      set_fact:
+        slurm_installed_version: "{{ slurm_upgrade_ctl_version.stdout | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+        slurm_installed_major: "{{ slurm_upgrade_ctl_version.stdout | regex_search('[0-9]+\\.[0-9]+') }}"
+        slurm_target_major: "{{ slurm_version | regex_search('^[0-9]+\\.[0-9]+') }}"
+
+    - name: nothing to do when the controller already runs the target
+      debug:
+        msg: "Controller already runs Slurm {{ slurm_version }}; the compute and login plays will skip hosts that are done."
+      when: slurm_installed_version == slurm_version
+
+    - name: refuse targets outside the SchedMD upgrade window
+      assert:
+        that:
+          - slurm_installed_version is version(slurm_version, '<=')
+          - (slurm_installed_major == slurm_target_major) or
+            (slurm_target_major in slurm_upgrade_windows and slurm_installed_major in slurm_upgrade_windows[slurm_target_major])
+        fail_msg: >-
+          Installed {{ slurm_installed_version }}, target {{ slurm_version }}. Slurm {{ slurm_target_major }} accepts upgrades from
+          {{ slurm_upgrade_windows[slurm_target_major] | default(['(unknown target, extend slurm_upgrade_windows)']) | join(', ') }} only,
+          and downgrades are never supported. From 23.02 go to 24.11 first, then to 26.05 (docs/kosmos/slurm-upgrade.md).
+
+    - name: collect the installed versions of the probed compute nodes
+      set_fact:
+        slurm_upgrade_node_versions: "{{ groups['slurm-node'] | map('extract', hostvars, 'slurm_installed_version') | select('defined') | list }}"
+
+    - name: refuse mixed starting versions on the compute nodes
+      assert:
+        that:
+          - slurm_upgrade_node_versions | length > 0
+          - slurm_upgrade_node_versions | reject('in', [slurm_installed_version, slurm_version]) | list | length == 0
+        fail_msg: >-
+          Compute nodes report {{ slurm_upgrade_node_versions | unique | join(', ') }}; the controller runs {{ slurm_installed_version }}
+          and the target is {{ slurm_version }}. Every node must be on one of those two before continuing.
+
+    - name: refuse compute nodes without the custom facts slurm.conf needs
+      assert:
+        that: hostvars[item].ansible_local.topology is defined and hostvars[item].ansible_local.memory is defined
+        fail_msg: "{{ item }}: custom facts (topology, memory) missing; run playbooks/slurm-cluster/slurm.yml's facts role or check /etc/ansible/facts.d there."
+      loop: "{{ groups['slurm-node'] }}"
+      when: hostvars[item].slurm_installed_version is defined
+
+    - name: hop-2 gate; the login node's clients must be within two major releases of the new daemons
+      assert:
+        that:
+          - (slurm_target_major is version('26.05', '<')) or
+            (hostvars[groups['slurm-login'][0]].slurm_installed_version | default('0.0.0') is version('24.11', '>=')) or
+            (slurm_upgrade_login_version_ack | default('0.0.0', true) is version('24.11', '>='))
+        fail_msg: >-
+          Target {{ slurm_version }} rejects clients older than 24.11 and the login node
+          {{ groups['slurm-login'][0] }} reports '{{ hostvars[groups['slurm-login'][0]].slurm_installed_version | default('unreachable') }}'.
+          Upgrade its client commands first (play 'login' of this playbook, or by hand) or, if it was upgraded by hand and cannot be
+          reached from here, pass -e slurm_upgrade_login_version_ack=<its version>.
+      when: groups['slurm-login'] | default([]) | length > 0
+
+    - name: render the munge key from slurm_password
+      set_fact:
+        slurm_upgrade_expected_munge_key: "{{ slurm_password | password_hash('sha512', slurm_cluster_name) }}"
+      no_log: true
+
+    - name: read the munge key on the controller and every compute node
+      slurp:
+        src: /etc/munge/munge.key
+      delegate_to: "{{ item }}"
+      loop: "{{ [inventory_hostname] + groups['slurm-node'] }}"
+      register: slurm_upgrade_munge_keys
+      no_log: true
+      check_mode: false
+
+    - name: refuse to continue when the live munge key is not derived from slurm_password
+      assert:
+        that: (item.content | b64decode | trim) == slurm_upgrade_expected_munge_key
+        fail_msg: >-
+          /etc/munge/munge.key on {{ item.item }} is not password_hash(slurm_password, slurm_cluster_name).
+          roles/slurm/tasks/build.yml would rewrite the key on the hosts it upgrades and break authentication cluster-wide.
+          Set slurm_password to the seed the key was generated from (docs/kosmos/slurm-secrets-vault.md) before upgrading.
+        quiet: yes
+      loop: "{{ slurm_upgrade_munge_keys.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      no_log: true
+
+    - name: check the controller services
+      command: systemctl is-active slurmctld slurmdbd mariadb munge
+      register: slurm_upgrade_services
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: refuse a controller that is not fully up
+      assert:
+        that: slurm_upgrade_services.rc == 0
+        fail_msg: "slurmctld/slurmdbd/mariadb/munge on {{ inventory_hostname }}: {{ slurm_upgrade_services.stdout_lines | join(' ') }}. Fix before upgrading."
+      when: slurm_installed_version != slurm_version
+
+    - name: check that slurmctld answers
+      command: "{{ slurm_install_prefix }}/bin/scontrol ping"
+      register: slurm_upgrade_ping
+      changed_when: false
+      check_mode: false
+      failed_when: "'UP' not in slurm_upgrade_ping.stdout"
+
+    - name: gather informational state (read it before continuing)
+      shell: |
+        echo "### sacctmgr show runawayjobs (fix by hand before the upgrade; never use -i)"
+        {{ slurm_install_prefix }}/bin/sacctmgr -P show runawayjobs </dev/null || true
+        echo "### sinfo -R (nodes down or drained now; they stay that way)"
+        {{ slurm_install_prefix }}/bin/sinfo -R || true
+        echo "### jobs: $({{ slurm_install_prefix }}/bin/squeue -h -t R | wc -l) running, $({{ slurm_install_prefix }}/bin/squeue -h -t PD | wc -l) pending"
+        echo "### database size (MB)"
+        mysql -N -e 'SELECT ROUND(SUM(data_length+index_length)/1048576) FROM information_schema.tables WHERE table_schema="slurm_acct_db"' || true
+        echo "### rows in the job and step tables"
+        mysql -N -e 'SELECT "jobs", COUNT(*) FROM {{ slurm_cluster_name }}_job_table UNION SELECT "steps", COUNT(*) FROM {{ slurm_cluster_name }}_step_table' || true
+        echo "### memory (MB): {{ ansible_memtotal_mb }}"
+        echo "### free space"; df -h {{ slurm_backup_dir | dirname }} {{ deepops_dir }} /var/lib/mysql | sed 1d
+        echo "### compute node OS versions"
+        {% for n in groups['slurm-node'] %}echo "{{ n }} {{ hostvars[n].ansible_distribution_version | default('?') }} slurm {{ hostvars[n].slurm_installed_version | default('?') }}"
+        {% endfor %}
+      args:
+        executable: /bin/bash
+      register: slurm_upgrade_info
+      changed_when: false
+      check_mode: false
+
+    - name: informational state
+      debug:
+        msg: "{{ slurm_upgrade_info.stdout_lines }}"
+
+    # The tarball is fetched BEFORE anything is uninstalled: build.yml removes
+    # the old installation first and downloads afterwards, so a failed
+    # download would otherwise leave the host without Slurm.
+    - name: create the source cache directory
+      file:
+        path: "{{ slurm_src_cache_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: download the Slurm {{ slurm_version }} source tarball
+      get_url:
+        url: "{{ slurm_src_url }}"
+        dest: "{{ slurm_src_cache_dir }}/slurm-{{ slurm_version }}.tar.bz2"
+        checksum: "{{ ('sha256:' ~ slurm_src_sha256) if slurm_src_sha256 else omit }}"
+        mode: "0644"
+      environment: "{{ proxy_env if proxy_env is defined else {} }}"
+
+    - name: size the InnoDB buffer pool (25 % of RAM, at most 4 GiB) unless configured
+      set_fact:
+        slurm_mariadb_buffer_pool_mb: "{{ slurm_mariadb_buffer_pool_mb | default([(ansible_memtotal_mb * 0.25) | int, 4096] | min) }}"
+
+    - name: write the MariaDB tuning drop-in for slurmdbd (applied by a restart in the controller play)
+      copy:
+        dest: /etc/mysql/mariadb.conf.d/99-slurmdbd.cnf
+        mode: "0644"
+        backup: yes
+        content: |
+          # Managed by playbooks/slurm-cluster/slurm-upgrade.yml (kosmos).
+          # SchedMD recommendations for slurmdbd, https://slurm.schedmd.com/accounting.html
+          [mysqld]
+          innodb_buffer_pool_size = {{ slurm_mariadb_buffer_pool_mb }}M
+          innodb_log_file_size = {{ (slurm_mariadb_buffer_pool_mb | int / 4) | int }}M
+          innodb_lock_wait_timeout = {{ slurm_mariadb_lock_wait_timeout }}
+          max_allowed_packet = {{ slurm_mariadb_max_allowed_packet }}
+
+          [mariadbd]
+          # slurmdbd cannot recover from the rollbacks this causes (MariaDB >= 10.6.18;
+          # loose- so older servers ignore the unknown option).
+          loose-innodb_snapshot_isolation = OFF
+      when: slurm_mariadb_tune | bool
+      register: slurm_upgrade_mariadb_dropin
+
+    # slurm.conf is shared over NFS (/sw/.slurm) and read by every daemon.
+    # Render with the raised timeouts to a side file first and show the diff:
+    # this is also the first time this branch's template touches the live
+    # file, so unrelated drift must be confirmed explicitly.
+    - name: render slurm.conf with raised timeouts to a side file
+      template:
+        src: "{{ slurm_conf_template if slurm_conf_template is abs else playbook_dir ~ '/../../roles/slurm/templates/' ~ slurm_conf_template }}"
+        dest: "{{ slurmctl_config_dir }}/slurm.conf.upgrade"
+        mode: "0644"
+      vars:
+        slurm_slurmctld_timeout: "{{ slurm_upgrade_timeout_raise }}"
+        slurm_slurmd_timeout: "{{ slurm_upgrade_timeout_raise }}"
+      check_mode: false
+      diff: false
+
+    - name: diff the rendered slurm.conf against the live one
+      command: diff -u {{ slurmctl_config_dir }}/slurm.conf {{ slurmctl_config_dir }}/slurm.conf.upgrade
+      register: slurm_upgrade_conf_diff
+      changed_when: false
+      check_mode: false
+      failed_when: slurm_upgrade_conf_diff.rc > 1
+
+    - name: slurm.conf changes the upgrade will apply
+      debug:
+        msg: "{{ slurm_upgrade_conf_diff.stdout_lines | default(['(no change)']) }}"
+
+    - name: refuse unexpected slurm.conf changes unless confirmed
+      assert:
+        that: >-
+          (slurm_upgrade_confirm_conf_diff | bool) or
+          (slurm_upgrade_conf_diff.stdout_lines
+           | select('match', '^[+-]')
+           | reject('match', '^(\+\+\+|---) ')
+           | reject('match', '^[+-](SlurmctldTimeout|SlurmdTimeout)=')
+           | list | length == 0)
+        fail_msg: >-
+          The rendered slurm.conf differs from the live file in more than the two timeout lines (see the diff above).
+          Compare with the expected drift in docs/kosmos/porting-notes.md ("Check-run results") and rerun with
+          -e slurm_upgrade_confirm_conf_diff=true to apply it, or fix the template/site config first.
+
+    - name: apply slurm.conf with raised timeouts
+      copy:
+        src: "{{ slurmctl_config_dir }}/slurm.conf.upgrade"
+        dest: "{{ slurmctl_config_dir }}/slurm.conf"
+        remote_src: yes
+        mode: "0644"
+        backup: yes
+      tags: [preflight, compute]
+
+    - name: reconfigure slurmctld and slurmd with the raised timeouts
+      command: "{{ slurm_install_prefix }}/bin/scontrol reconfigure"
+      when: not ansible_check_mode
+      tags: [preflight, compute]
+
+    - name: confirm the raised timeouts are live
+      command: "{{ slurm_install_prefix }}/bin/scontrol show config"
+      register: slurm_upgrade_conf_live
+      changed_when: false
+      failed_when: >-
+        ('SlurmdTimeout            = ' ~ slurm_upgrade_timeout_raise ~ ' sec') not in slurm_upgrade_conf_live.stdout or
+        ('SlurmctldTimeout         = ' ~ slurm_upgrade_timeout_raise ~ ' sec') not in slurm_upgrade_conf_live.stdout
+      when: not ansible_check_mode
+      tags: [preflight, compute]
+
+    - name: check that every compute node sees the same slurm.conf over NFS
+      command: sha256sum {{ slurm_config_dir }}/slurm.conf
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['slurm-node'] }}"
+      register: slurm_upgrade_conf_sums
+      changed_when: false
+      check_mode: false
+      when: hostvars[item].slurm_installed_version is defined
+
+    - name: read the controller's slurm.conf checksum
+      command: sha256sum {{ slurmctl_config_dir }}/slurm.conf
+      register: slurm_upgrade_conf_sum_ctl
+      changed_when: false
+      check_mode: false
+
+    - name: refuse nodes whose slurm.conf differs from the controller's
+      assert:
+        that: item.skipped | default(false) or item.stdout.split()[0] == slurm_upgrade_conf_sum_ctl.stdout.split()[0]
+        fail_msg: "{{ item.item }} does not see the controller's slurm.conf (NFS /sw not mounted or stale?)."
+        quiet: yes
+      loop: "{{ slurm_upgrade_conf_sums.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+##############################################################################
+# Play 2: backup, with slurmdbd stopped and left stopped
+##############################################################################
+- name: Back up before touching anything
+  import_playbook: slurm-backup.yml
+  vars:
+    # Stop slurmdbd for the dump only when the controller still has to be
+    # converted; on a rerun (e.g. after the canary) it keeps running.
+    slurm_backup_stop_slurmdbd: "{{ hostvars[groups['slurm-master'][0]].slurm_installed_version | default('') != slurm_version }}"
+    slurm_backup_start_slurmdbd_after: false
+    slurm_backup_nodes: true
+    slurm_backup_label: "-to-{{ slurm_version }}"
+  tags: [backup]
+
+##############################################################################
+# Play 3: controller (slurmdbd conversion in the foreground, then slurmctld)
+##############################################################################
+- name: Upgrade slurmdbd and slurmctld on the controller
+  hosts: slurm-master
+  become: yes
+  any_errors_fatal: true
+  tags: [controller]
+  tasks:
+    - name: refuse check mode from here on (builds and restarts cannot be simulated)
+      assert:
+        that: not ansible_check_mode
+        fail_msg: "Only the preflight supports --check. Rerun without --check, or with --tags preflight."
+
+    - name: apply upgrade defaults
+      set_fact:
+        slurm_src_cache_dir: "{{ slurm_src_cache_dir | default(deepops_dir ~ '/build/src') }}"
+        slurm_mariadb_tune: "{{ slurm_mariadb_tune | default(true) }}"
+        slurm_dbd_convert_timeout: "{{ slurm_dbd_convert_timeout | default(43200) }}"
+
+    - name: load slurm role defaults and OS variables
+      include_role:
+        name: slurm
+        tasks_from: setup-role
+        public: yes
+
+    - name: make sure slurmdbd runs when the controller is already on the target version
+      systemd:
+        name: slurmdbd
+        state: started
+      when: slurm_installed_version | default('') == slurm_version
+
+    - name: skip the controller when it already runs the target version
+      meta: end_host
+      when: slurm_installed_version | default('') == slurm_version
+
+    - name: require the backup from play 2
+      assert:
+        that: slurm_backup_path is defined
+        fail_msg: "No backup path from slurm-backup.yml in this run; do not run --tags controller on its own."
+
+    - name: require slurmdbd to be stopped (the backup play leaves it stopped)
+      command: systemctl is-active slurmdbd
+      register: slurm_upgrade_dbd_active
+      changed_when: false
+      failed_when: slurm_upgrade_dbd_active.rc == 0
+
+    - name: restart MariaDB with the tuned settings (slurmdbd is stopped)
+      systemd:
+        name: mariadb
+        state: restarted
+      when: slurm_mariadb_tune | bool
+
+    - name: wait for MariaDB
+      command: mysqladmin ping
+      register: slurm_upgrade_mysqladmin
+      until: slurm_upgrade_mysqladmin.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+
+    - name: show the effective InnoDB settings
+      command: mysql -N -e 'SELECT @@innodb_buffer_pool_size/1048576, @@innodb_lock_wait_timeout, @@innodb_log_file_size/1048576, @@max_allowed_packet/1048576'
+      register: slurm_upgrade_innodb
+      changed_when: false
+
+    - name: effective InnoDB settings (buffer pool MB, lock wait s, log file MB, max packet MB)
+      debug:
+        msg: "{{ slurm_upgrade_innodb.stdout }}"
+
+    - name: stop slurmctld
+      systemd:
+        name: slurmctld
+        state: stopped
+
+    - name: wait until slurmctld has released its port
+      wait_for:
+        port: 6817
+        state: stopped
+        timeout: 300
+
+    - name: archive the state directory now that slurmctld is stopped
+      command: tar --warning=no-file-changed -czf {{ slurm_backup_path }}/statesave-ctld-stopped.tgz -C /var/spool/slurm ctld
+      register: slurm_upgrade_state_tar
+      failed_when: slurm_upgrade_state_tar.rc not in [0, 1]
+
+    # build.yml: uninstall old, unpack, configure, make, make install,
+    # pam_slurm_adopt. No daemon is restarted: the role's restart handlers
+    # are gated on is_controller/is_compute, which stay at their defaults.
+    - name: build and install Slurm {{ slurm_version }} (controller outage starts here)
+      include_role:
+        name: slurm
+        tasks_from: build
+      vars:
+        slurm_src_url: "{{ slurm_src_cache_dir }}/slurm-{{ slurm_version }}.tar.bz2"
+
+    - name: consume the build's restart notifications (no-ops)
+      meta: flush_handlers
+
+    - name: verify the installed version
+      command: "{{ slurm_install_prefix }}/sbin/slurmd --version"
+      register: slurm_upgrade_new_version
+      changed_when: false
+      failed_when: slurm_version not in slurm_upgrade_new_version.stdout
+
+    - name: verify the accounting storage plugin was built
+      stat:
+        path: "{{ slurm_install_prefix }}/lib/slurm/accounting_storage_mysql.so"
+      register: slurm_upgrade_as_mysql
+      failed_when: not slurm_upgrade_as_mysql.stat.exists
+
+    - name: install the new systemd unit files
+      copy:
+        src: "{{ slurm_build_dir }}/etc/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        remote_src: yes
+        mode: "0644"
+        backup: yes
+      loop:
+        - slurmctld.service
+        - slurmdbd.service
+
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    # First start of the new slurmdbd: it converts the database schema before
+    # it opens its port. Done in the foreground as SchedMD recommends, with
+    # its own log, so systemd cannot kill it half-way.
+    - name: start the new slurmdbd in the foreground for the database conversion
+      shell: "exec {{ slurm_install_prefix }}/sbin/slurmdbd -D -vvv > {{ slurm_backup_path }}/slurmdbd-convert.log 2>&1"
+      async: "{{ slurm_dbd_convert_timeout | int + 120 }}"
+      poll: 0
+      register: slurm_upgrade_dbd_fg
+
+    - name: wait for the conversion (port 6819 opens when it is done)
+      block:
+        - name: wait for slurmdbd to listen or exit
+          shell: |
+            start=$(date +%s)
+            while true; do
+              if ss -ltn | grep -q ':6819 '; then echo "slurmdbd listening after $(( $(date +%s) - start )) s"; exit 0; fi
+              if ! pgrep -x slurmdbd >/dev/null; then echo "slurmdbd exited after $(( $(date +%s) - start )) s"; exit 2; fi
+              if [ $(( $(date +%s) - start )) -ge {{ slurm_dbd_convert_timeout }} ]; then echo "timeout after {{ slurm_dbd_convert_timeout }} s"; exit 3; fi
+              sleep 10
+            done
+          args:
+            executable: /bin/bash
+          async: "{{ slurm_dbd_convert_timeout | int + 60 }}"
+          poll: 30
+          register: slurm_upgrade_dbd_wait
+          changed_when: false
+      rescue:
+        - name: show the end of the conversion log
+          command: tail -n 60 {{ slurm_backup_path }}/slurmdbd-convert.log
+          register: slurm_upgrade_convert_tail
+          changed_when: false
+          failed_when: false
+
+        - name: conversion failed
+          fail:
+            msg:
+              - "{{ slurm_upgrade_dbd_wait.stdout | default('slurmdbd wait failed') }}"
+              - "{{ slurm_upgrade_convert_tail.stdout_lines | default([]) }}"
+              - "The database may be partially converted. Do not start the old slurmdbd. Read docs/kosmos/slurm-upgrade.md, section Rollback."
+
+    - name: check the conversion log
+      shell: |
+        set -o pipefail
+        log={{ slurm_backup_path }}/slurmdbd-convert.log
+        echo "### fatal lines: $(grep -c 'fatal:' $log)"
+        grep 'fatal:' $log || true
+        echo "### conversion lines"; grep -i 'convert' $log || echo "(none: no schema conversion was needed)"
+        echo "### version line"; grep 'slurmdbd version' $log || true
+        echo "### error lines: $(grep -c ' error: ' $log)"; grep ' error: ' $log | tail -n 20 || true
+        test "$(grep -c 'fatal:' $log)" = 0
+        grep -q 'slurmdbd version {{ slurm_version }} started' $log
+      args:
+        executable: /bin/bash
+      register: slurm_upgrade_convert_check
+      changed_when: false
+
+    - name: conversion log summary
+      debug:
+        msg: "{{ slurm_upgrade_convert_check.stdout_lines }}"
+
+    - name: check that the converted database answers
+      command: "{{ slurm_install_prefix }}/bin/sacctmgr -n show cluster format=Cluster,ControlHost,RPC"
+      register: slurm_upgrade_sacctmgr
+      until: slurm_upgrade_sacctmgr.rc == 0 and slurm_cluster_name in slurm_upgrade_sacctmgr.stdout
+      retries: 12
+      delay: 5
+      changed_when: false
+
+    - name: stop the foreground slurmdbd
+      command: pkill -TERM -x slurmdbd
+      register: slurm_upgrade_pkill
+      failed_when: slurm_upgrade_pkill.rc not in [0, 1]
+
+    - name: wait until the foreground slurmdbd has exited
+      async_status:
+        jid: "{{ slurm_upgrade_dbd_fg.ansible_job_id }}"
+      register: slurm_upgrade_dbd_fg_result
+      until: slurm_upgrade_dbd_fg_result.finished
+      retries: 120
+      delay: 5
+      failed_when: false
+
+    - name: clean up the async job
+      async_status:
+        jid: "{{ slurm_upgrade_dbd_fg.ansible_job_id }}"
+        mode: cleanup
+
+    - name: start slurmdbd under systemd
+      systemd:
+        name: slurmdbd
+        state: started
+        enabled: yes
+
+    - name: wait for slurmdbd
+      wait_for:
+        port: 6819
+        timeout: 600
+
+    - name: check the accounting database again under systemd
+      command: "{{ slurm_install_prefix }}/bin/sacctmgr -n show cluster format=Cluster,ControlHost,RPC"
+      register: slurm_upgrade_sacctmgr2
+      until: slurm_upgrade_sacctmgr2.rc == 0
+      retries: 12
+      delay: 5
+      changed_when: false
+
+    - name: start slurmctld under systemd
+      systemd:
+        name: slurmctld
+        state: started
+        enabled: yes
+
+    - name: wait for slurmctld to answer
+      command: "{{ slurm_install_prefix }}/bin/scontrol ping"
+      register: slurm_upgrade_ping2
+      until: slurm_upgrade_ping2.rc == 0 and 'UP' in slurm_upgrade_ping2.stdout
+      retries: 60
+      delay: 5
+      changed_when: false
+
+    - name: verify the running controller version
+      command: "{{ slurm_install_prefix }}/bin/scontrol show config"
+      register: slurm_upgrade_ctl_conf
+      changed_when: false
+      failed_when: ('SLURM_VERSION           = ' ~ slurm_version) not in slurm_upgrade_ctl_conf.stdout
+
+    - name: node states after the controller restart
+      command: "{{ slurm_install_prefix }}/bin/sinfo -h -N -o '%N %T %E'"
+      register: slurm_upgrade_sinfo
+      changed_when: false
+
+    - name: controller upgraded
+      debug:
+        msg:
+          - "Controller now runs Slurm {{ slurm_version }}; cluster record: {{ slurm_upgrade_sacctmgr2.stdout | trim }}"
+          - "Nodes: {{ slurm_upgrade_sinfo.stdout_lines }}"
+          - "Conversion log: {{ slurm_backup_path }}/slurmdbd-convert.log"
+
+##############################################################################
+# Play 4: compute nodes, a few at a time, drained during their build window
+##############################################################################
+- name: Upgrade slurmd on the compute nodes
+  hosts: slurm-node
+  become: yes
+  gather_facts: no
+  serial: "{{ slurm_upgrade_serial | default(2) }}"
+  max_fail_percentage: 0
+  tags: [compute]
+  tasks:
+    - name: refuse check mode (builds and restarts cannot be simulated)
+      assert:
+        that: not ansible_check_mode
+        fail_msg: "Only the preflight supports --check."
+
+    - name: apply upgrade defaults
+      set_fact:
+        slurm_src_cache_dir: "{{ slurm_src_cache_dir | default(deepops_dir ~ '/build/src') }}"
+        slurm_src_sha256: "{{ slurm_src_sha256 | default('') }}"
+        slurm_upgrade_drain_nodes: "{{ slurm_upgrade_drain_nodes | default(true) }}"
+        slurm_upgrade_drain_reason: "{{ slurm_upgrade_drain_reason | default('slurm upgrade to ' ~ slurm_version) }}"
+        slurm_upgrade_controller: "{{ groups['slurm-master'][0] }}"
+
+    # Distribution facts are needed by the role's apt tasks; hardware facts
+    # are skipped (gaia, see porting notes). Custom facts come along.
+    - name: gather facts without hardware
+      setup:
+        gather_subset: ['!hardware']
+
+    - name: read the installed Slurm version
+      command: "{{ slurm_install_prefix }}/sbin/slurmd --version"
+      register: slurm_upgrade_node_version
+      changed_when: false
+
+    - name: record the installed version
+      set_fact:
+        slurm_installed_version: "{{ slurm_upgrade_node_version.stdout | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+
+    - name: is slurmd running
+      command: systemctl is-active slurmd
+      register: slurm_upgrade_slurmd_active
+      changed_when: false
+      failed_when: false
+
+    - name: skip nodes that already run the target version
+      meta: end_host
+      when: slurm_installed_version == slurm_version and slurm_upgrade_slurmd_active.rc == 0
+
+    - name: require the controller to be upgraded first
+      command: "{{ slurm_install_prefix }}/bin/scontrol show config"
+      delegate_to: "{{ slurm_upgrade_controller }}"
+      register: slurm_upgrade_ctl_conf
+      changed_when: false
+      failed_when: ('SLURM_VERSION           = ' ~ slurm_version) not in slurm_upgrade_ctl_conf.stdout
+
+    - name: load slurm role defaults and OS variables
+      include_role:
+        name: slurm
+        tasks_from: setup-role
+        public: yes
+
+    - name: create the source cache directory
+      file:
+        path: "{{ slurm_src_cache_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: download the Slurm {{ slurm_version }} source tarball before anything is removed
+      get_url:
+        url: "{{ slurm_src_url }}"
+        dest: "{{ slurm_src_cache_dir }}/slurm-{{ slurm_version }}.tar.bz2"
+        checksum: "{{ ('sha256:' ~ slurm_src_sha256) if slurm_src_sha256 else omit }}"
+        mode: "0644"
+      environment: "{{ proxy_env if proxy_env is defined else {} }}"
+
+    - name: read the node's state from the controller
+      command: "{{ slurm_install_prefix }}/bin/scontrol show node -o {{ inventory_hostname }}"
+      delegate_to: "{{ slurm_upgrade_controller }}"
+      register: slurm_upgrade_node_before
+      changed_when: false
+
+    - name: remember whether the node was already drained
+      set_fact:
+        slurm_upgrade_node_was_drained: "{{ 'DRAIN' in (slurm_upgrade_node_before.stdout | regex_search('State=[^ ]+') | default('')) }}"
+
+    # While the old installation is removed and the new one compiles, there
+    # is no slurmstepd on disk: running steps continue, new ones cannot
+    # start. Draining keeps new jobs off the node for those minutes.
+    - name: drain the node for the build window
+      command: >
+        {{ slurm_install_prefix }}/bin/scontrol update nodename={{ inventory_hostname }}
+        state=drain reason="{{ slurm_upgrade_drain_reason }}"
+      delegate_to: "{{ slurm_upgrade_controller }}"
+      when: slurm_upgrade_drain_nodes | bool and not slurm_upgrade_node_was_drained
+
+    - name: count running job steps before the upgrade
+      command: pgrep -c -x slurmstepd
+      register: slurm_upgrade_steps_before
+      changed_when: false
+      failed_when: false
+
+    - name: build and install Slurm {{ slurm_version }}
+      include_role:
+        name: slurm
+        tasks_from: build
+      vars:
+        slurm_src_url: "{{ slurm_src_cache_dir }}/slurm-{{ slurm_version }}.tar.bz2"
+
+    - name: consume the build's restart notifications (no-ops)
+      meta: flush_handlers
+
+    - name: verify the installed version
+      command: "{{ slurm_install_prefix }}/sbin/slurmd --version"
+      register: slurm_upgrade_new_version
+      changed_when: false
+      failed_when: slurm_version not in slurm_upgrade_new_version.stdout
+
+    - name: install the new slurmd unit file
+      copy:
+        src: "{{ slurm_build_dir }}/etc/slurmd.service"
+        dest: /etc/systemd/system/slurmd.service
+        remote_src: yes
+        mode: "0644"
+        backup: yes
+
+    - name: render cgroup.conf from the role template
+      template:
+        src: "{{ slurm_cgroup_conf_template if slurm_cgroup_conf_template is abs else playbook_dir ~ '/../../roles/slurm/templates/' ~ slurm_cgroup_conf_template }}"
+        dest: "{{ slurm_config_dir }}/cgroup.conf"
+        mode: "0644"
+        backup: yes
+
+    - name: restart slurmd on the new version (running steps keep running)
+      systemd:
+        name: slurmd
+        daemon_reload: yes
+        state: restarted
+        enabled: yes
+
+    - name: wait for the controller to see the node on the new version
+      command: "{{ slurm_install_prefix }}/bin/scontrol show node -o {{ inventory_hostname }}"
+      delegate_to: "{{ slurm_upgrade_controller }}"
+      register: slurm_upgrade_node_after
+      until: >-
+        ('Version=' ~ slurm_version) in slurm_upgrade_node_after.stdout and
+        'NOT_RESPONDING' not in slurm_upgrade_node_after.stdout and
+        (slurm_upgrade_node_after.stdout | regex_search('State=[^ ]+') | default('', true)) is not search('DOWN')
+      retries: 18
+      delay: 10
+      changed_when: false
+
+    - name: count running job steps after the upgrade
+      command: pgrep -c -x slurmstepd
+      register: slurm_upgrade_steps_after
+      changed_when: false
+      failed_when: false
+
+    - name: resume the node if this play drained it
+      command: "{{ slurm_install_prefix }}/bin/scontrol update nodename={{ inventory_hostname }} state=resume"
+      delegate_to: "{{ slurm_upgrade_controller }}"
+      when:
+        - slurm_upgrade_drain_nodes | bool
+        - not slurm_upgrade_node_was_drained
+        - slurm_upgrade_drain_reason in slurm_upgrade_node_after.stdout
+
+    - name: node upgraded
+      debug:
+        msg: >-
+          {{ inventory_hostname }} runs Slurm {{ slurm_version }};
+          job steps before/after: {{ slurm_upgrade_steps_before.stdout | default('0') }}/{{ slurm_upgrade_steps_after.stdout | default('0') }};
+          {{ slurm_upgrade_node_after.stdout | regex_search('State=[^ ]+') }}
+
+##############################################################################
+# Play 5: restore the timeouts and summarise
+##############################################################################
+- name: Restore timeouts and validate
+  hosts: slurm-master
+  become: yes
+  tags: [finish]
+  tasks:
+    - name: refuse check mode
+      assert:
+        that: not ansible_check_mode
+        fail_msg: "Only the preflight supports --check."
+
+    - name: apply upgrade defaults
+      set_fact:
+        slurm_upgrade_allow_partial: "{{ slurm_upgrade_allow_partial | default(false) }}"
+        slurm_backup_dir: "{{ slurm_backup_dir | default('/var/backups/slurm') }}"
+
+    - name: load slurm role defaults and OS variables
+      include_role:
+        name: slurm
+        tasks_from: setup-role
+        public: yes
+
+    - name: versions per node as the controller sees them
+      command: "{{ slurm_install_prefix }}/bin/sinfo -h -N -o '%N %v %T %E'"
+      register: slurm_upgrade_versions
+      changed_when: false
+
+    - name: list nodes not yet on the target version
+      set_fact:
+        slurm_upgrade_stragglers: "{{ slurm_upgrade_versions.stdout_lines | reject('search', ' ' ~ slurm_version ~ ' ') | list }}"
+
+    - name: refuse to restore the timeouts while nodes are still on the old version
+      assert:
+        that: slurm_upgrade_stragglers | length == 0 or slurm_upgrade_allow_partial | bool
+        fail_msg: >-
+          Not on {{ slurm_version }} yet: {{ slurm_upgrade_stragglers | join('; ') }}.
+          Finish them with --tags compute,finish (or --limit), or pass -e slurm_upgrade_allow_partial=true to
+          restore the timeouts anyway (a node then has 300 s to answer before it is marked down).
+
+    - name: render slurm.conf with the normal timeouts
+      template:
+        src: "{{ slurm_conf_template if slurm_conf_template is abs else playbook_dir ~ '/../../roles/slurm/templates/' ~ slurm_conf_template }}"
+        dest: "{{ slurmctl_config_dir }}/slurm.conf"
+        mode: "0644"
+        backup: yes
+
+    - name: remove the side file from the preflight
+      file:
+        path: "{{ slurmctl_config_dir }}/slurm.conf.upgrade"
+        state: absent
+
+    - name: reconfigure
+      command: "{{ slurm_install_prefix }}/bin/scontrol reconfigure"
+
+    - name: summary
+      shell: |
+        echo "### scontrol show config"; {{ slurm_install_prefix }}/bin/scontrol show config | grep -E 'SLURM_VERSION|PriorityType|SlurmdTimeout|SlurmctldTimeout|CgroupPlugin'
+        echo "### sacctmgr show cluster (Cluster ControlHost RPC)"; {{ slurm_install_prefix }}/bin/sacctmgr -n show cluster format=Cluster,ControlHost,RPC
+        echo "### nodes (name version state reason)"; {{ slurm_install_prefix }}/bin/sinfo -h -N -o '%N %v %T %E'
+        echo "### jobs finished in the last hour (accounting is live if this lists states)"
+        {{ slurm_install_prefix }}/bin/sacct -a -X -n -S now-1hour -o State | sort | uniq -c
+        echo "### jobs: $({{ slurm_install_prefix }}/bin/squeue -h -t R | wc -l) running, $({{ slurm_install_prefix }}/bin/squeue -h -t PD | wc -l) pending"
+        echo "### errors in slurmctld.log today: $(grep -c "$(date +%Y-%m-%d).*error:" /var/log/slurm/slurmctld.log 2>/dev/null || echo 0)"
+        echo "### backups: $(ls -d {{ slurm_backup_dir }}/*-to-{{ slurm_version }} 2>/dev/null | tail -1)"
+      args:
+        executable: /bin/bash
+      register: slurm_upgrade_summary
+      changed_when: false
+
+    - name: upgrade summary
+      debug:
+        msg: "{{ slurm_upgrade_summary.stdout_lines }}"
+
+    - name: what next
+      debug:
+        msg:
+          - "Timeouts restored. Watch the cluster for the soak period (docs/kosmos/slurm-upgrade.md, 'Soak'), then run scripts/validation/validate_slurm.py on a node."
+          - "Keep the backup directory until the hop has soaked. Rollback: docs/kosmos/slurm-upgrade.md."
+
+##############################################################################
+# Play 6: login node client commands (last: an unreachable kosmos must not
+# abort the timeout restore above)
+##############################################################################
+- name: Upgrade the client commands on the login node
+  hosts: slurm-login
+  become: yes
+  gather_facts: no
+  ignore_unreachable: true
+  tags: [login]
+  tasks:
+    - name: skip the login node when asked to (-e slurm_upgrade_login=false; hop 1 only)
+      meta: end_host
+      when: not (slurm_upgrade_login | default(true) | bool)
+
+    - name: refuse check mode
+      assert:
+        that: not ansible_check_mode
+        fail_msg: "Only the preflight supports --check."
+
+    - name: apply upgrade defaults
+      set_fact:
+        slurm_src_cache_dir: "{{ slurm_src_cache_dir | default(deepops_dir ~ '/build/src') }}"
+        slurm_src_sha256: "{{ slurm_src_sha256 | default('') }}"
+
+    - name: gather facts without hardware
+      setup:
+        gather_subset: ['!hardware']
+
+    - name: read the installed client version
+      command: "{{ slurm_install_prefix }}/bin/sinfo --version"
+      register: slurm_upgrade_login_version
+      changed_when: false
+      failed_when: false
+
+    - name: skip the login node when it already runs the target version
+      meta: end_host
+      when: slurm_upgrade_login_version.rc == 0 and slurm_version in slurm_upgrade_login_version.stdout
+
+    - name: load slurm role defaults and OS variables
+      include_role:
+        name: slurm
+        tasks_from: setup-role
+        public: yes
+
+    - name: create the source cache directory
+      file:
+        path: "{{ slurm_src_cache_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: download the Slurm {{ slurm_version }} source tarball before anything is removed
+      get_url:
+        url: "{{ slurm_src_url }}"
+        dest: "{{ slurm_src_cache_dir }}/slurm-{{ slurm_version }}.tar.bz2"
+        checksum: "{{ ('sha256:' ~ slurm_src_sha256) if slurm_src_sha256 else omit }}"
+        mode: "0644"
+      environment: "{{ proxy_env if proxy_env is defined else {} }}"
+
+    - name: build and install Slurm {{ slurm_version }} (client commands and libraries)
+      include_role:
+        name: slurm
+        tasks_from: build
+      vars:
+        slurm_src_url: "{{ slurm_src_cache_dir }}/slurm-{{ slurm_version }}.tar.bz2"
+
+    - name: consume the build's restart notifications (no-ops)
+      meta: flush_handlers
+
+    - name: verify the client commands against the new controller
+      command: "{{ slurm_install_prefix }}/bin/sinfo --version"
+      register: slurm_upgrade_login_after
+      changed_when: false
+      failed_when: slurm_version not in slurm_upgrade_login_after.stdout
+
+    - name: check that the login node can talk to the controller
+      command: "{{ slurm_install_prefix }}/bin/sinfo -h -o '%P %a %D'"
+      changed_when: false
+
+    - name: login node upgraded
+      debug:
+        msg: "{{ inventory_hostname }} client commands on Slurm {{ slurm_version }}."

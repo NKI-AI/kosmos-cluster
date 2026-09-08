@@ -4,9 +4,20 @@
 # Slurm job scheduler configuration
 # Playbook: slurm, slurm-cluster, slurm-perf, slurm-perf-cluster, slurm-validation
 # kosmos: pin the Slurm version that runs on the cluster. Upstream 26.07
-# defaults to 26.05.x; Slurm only supports upgrading two major versions at a
-# time, so a Slurm upgrade is a separate project (see docs/kosmos/porting-notes.md).
+# defaults to 26.05.x. Bump this ONLY as part of the upgrade procedure in
+# docs/kosmos/slurm-upgrade.md (one hop per commit: 23.02.4 -> 24.11.7 ->
+# 26.05.4; Slurm 24.11+ accepts upgrades from the three previous major
+# releases). playbooks/slurm-cluster/slurm-upgrade.yml refuses to run when
+# the effective slurm_version differs from this pin, so never pass it with -e.
 slurm_version: "23.02.4"
+
+# kosmos: knobs read by playbooks/slurm-cluster/slurm-backup.yml and
+# slurm-upgrade.yml (defaults shown; uncomment to change).
+# slurm_backup_dir: /var/backups/slurm          # on the controller
+# slurm_backup_fetch_dir: ~/slurm-backups        # copy of the dump on the Ansible node
+# slurm_mariadb_tune: true                       # write /etc/mysql/mariadb.conf.d/99-slurmdbd.cnf
+# slurm_mariadb_buffer_pool_mb: 4096             # default: min(4096, 25 % of RAM)
+# slurm_upgrade_serial: 2                        # compute nodes upgraded at a time
 
 # kosmos: site paths. Upstream roles default to /opt/deepops; master carried
 # these as edits to roles/*/defaults, here they live in site config.

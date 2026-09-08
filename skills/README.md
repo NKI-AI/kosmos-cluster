@@ -15,6 +15,7 @@ agent (or person) can simply read the relevant `SKILL.md` before acting.
 | [deploy-k8s-gpu-cluster](deploy-k8s-gpu-cluster/SKILL.md) | Deploying or rebuilding a Kubernetes GPU cluster. |
 | [validate-gpu-cluster](validate-gpu-cluster/SKILL.md) | Health checks and post-deploy verification. |
 | [diagnose-driver-install](diagnose-driver-install/SKILL.md) | NVIDIA driver failures, `nvidia-smi` errors, GPU pods crash-looping. |
+| [upgrade-slurm](upgrade-slurm/SKILL.md) | Upgrading Slurm on the KOSMOS cluster one major release at a time, with backups (site-specific). |
 
 Start with [AGENTS.md](../AGENTS.md) at the repository root for orientation,
 golden paths, and operating rules.
