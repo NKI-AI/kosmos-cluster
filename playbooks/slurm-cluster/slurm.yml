@@ -28,9 +28,8 @@
         name: slurm
         tasks_from: build
 
-# Configure slurm.conf. Reload ansible_local for every slurm-node first
-# (template walks the whole group). Honor --limit only for who runs the
-# role; facts still come from all compute nodes.
+# Configure misc nodes. Without a shared slurm.conf these hosts render the
+# cluster-wide template, so refresh every compute node's ansible_local first.
 - hosts: slurm-cluster
   become: yes
   pre_tasks:
@@ -38,6 +37,12 @@
       include_role:
         name: facts
         tasks_from: gather-slurm-nodes
+        apply:
+          tags:
+            - config
+      when: not slurm_conf_symlink
+      tags:
+        - config
   roles:
     - name: slurm
       vars:
@@ -47,6 +52,17 @@
 # Set up slurm controller
 - hosts: slurm-master
   become: yes
+  pre_tasks:
+    - name: Load ansible_local from all slurm-node hosts for slurm.conf
+      include_role:
+        name: facts
+        tasks_from: gather-slurm-nodes
+        apply:
+          tags:
+            - config
+      when: slurm_conf_symlink
+      tags:
+        - config
   roles:
     - name: slurm
       vars:

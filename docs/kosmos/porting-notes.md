@@ -585,11 +585,16 @@ and Slurm is upgraded. Everything below waits for that day; until then only
   `ansible_default_ipv4` was missing (so `--limit` still SSHes to atlas and
   kosmos, and a bare `setup:` still ran the mount collector on gaia).
   **Fixed:** first play is `hosts: slurm-node` with implicit `min` gather
-  and `roles: [facts]`. The configure play (`slurm-cluster`) then
-  `setup`/`local` over `groups['slurm-node']`
-  (`roles/facts/tasks/gather-slurm-nodes.yml`) because the slurm.conf
-  template walks every compute node. That gather still runs under
-  `--limit gaia` (it must). Login is not a facts target.
+  and `roles: [facts]`. Before rendering slurm.conf, the play that owns the
+  template then runs `setup`/`local` over `groups['slurm-node']`
+  (`roles/facts/tasks/gather-slurm-nodes.yml`) because the template walks
+  every compute node. With `slurm_conf_symlink: true`, that is the controller
+  play: only the controller renders the shared file, while login and compute
+  nodes link to it. Without the shared file, the configure play gathers the
+  facts before misc nodes render their local copy. The gather is tagged
+  `config`, including the dynamically included task, so it also runs with
+  `--tags config`. A `--limit gaia` run in symlink mode neither gathers the
+  whole cluster nor renders slurm.conf. Login is not a facts target.
   `docs/kosmos/render-slurm-conf.yml` stays a helper and is not part of
   deploy.
 - Implicit gather `min` is `ansible_gather_subset` in

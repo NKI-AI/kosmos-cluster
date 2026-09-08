@@ -99,6 +99,8 @@
     dest: "{{ slurmctl_config_dir }}/slurm.conf"
     mode: "0644"
   when: slurm_conf_symlink
+  notify:
+  - restart slurmctld
   tags:
   - config
 

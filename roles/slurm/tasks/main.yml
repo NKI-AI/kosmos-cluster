@@ -6,6 +6,8 @@
 
 - name: Setup role
   include_tasks: setup-role.yml
+  tags:
+    - always
 
 - name: Setup build
   include_tasks: build.yml
@@ -21,14 +23,24 @@
 - name: Setup slurm controller
   include_tasks: controller.yml
   when: is_controller
+  tags:
+    - config
 
 - name: Setup slurm on compute nodes
   include_tasks: compute.yml
   when: is_compute
+  tags:
+    - config
 
 - name: Setup slurm on other nodes
   include_tasks: misc-node.yml
-  when: (not is_compute) and (not is_controller)
+  when:
+    - not is_compute
+    - not is_controller
+    - inventory_hostname not in groups.get('slurm-node', [])
+    - inventory_hostname not in groups.get('slurm-master', [])
+  tags:
+    - config
 
 - name: Apply shm fix
   include_tasks: shmfix.yml
