@@ -408,7 +408,8 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   on gaia and aristarchus, which run newer versions than the pin (4c).
 - **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
   dead per-host overrides in host_vars silently ignored (5a); nvtop builds an
-  unpinned git HEAD (4b).
+  unpinned git HEAD (4b); `slurm.yml` gathers facts from every inventory
+  host, and gaia dies on hardware gather (facts gathering).
 - **Cleanup when convenient:** everything else below.
 
 ### Slurm role (commit c9d86ffc)
@@ -425,9 +426,24 @@ issues were removed; corrections are marked "corrected 2026-09-08".
 
 ### Facts gathering (commit 00ae45d2)
 
-- `run_once: true` on the "Gather facts from ALL hosts" pre_task in
-  `playbooks/slurm-cluster/slurm.yml`, so one host does the delegated
-  gathering instead of every host in the play repeating the same loop.
+- `playbooks/slurm-cluster/slurm.yml` first play is `hosts: all` and a
+  pre_task that `setup`s every member of `groups['all']` (so `--limit` still
+  SSHes to atlas and kosmos) when `ansible_default_ipv4` is missing. Adding
+  `run_once` would only stop the loop repeating per host; it would not
+  shrink the host list or skip hardware facts. slurm.conf only needs
+  `ansible_local` (memory, topology, gpus) for each `slurm-node`; gres.conf
+  uses the same facts on that node because `slurm_autodetect_nvml` is
+  false. kosmos is not required. `docs/kosmos/render-slurm-conf.yml` is a
+  blocked-controller helper and is not part of deploy.
+- Intended shape, same as `playbooks/slurm-cluster/create_mounts.yml`
+  already does: implicit gather `min` only (`ansible_gather_subset` at the
+  top of `config/group_vars/slurm-cluster.yml`, not next to NVML);
+  `roles/facts` for `ansible_local`, always refresh, not in the 24 h cache;
+  hardware/network only if a play needs them; `--limit` honored except a
+  `run_once` `setup`/`local` over `groups['slurm-node']` when templating
+  slurm.conf. `ansible_gather_subset: [min]` is in group_vars. NHC
+  `nhc.conf.j2` uses `ansible_local.memory` and no longer loops
+  `ansible_interfaces`. `slurm.yml` still gathers `groups['all']`.
 
 ### NFS mounts (chunk 4a)
 
@@ -532,19 +548,23 @@ area has several leftovers that need a decision (update or remove).
   with user activity (submounts expire after `nfs_mountpoint_timeout`, 500 s,
   when unused), which is why the same step can pass at one moment and fail
   ten minutes later. **Not an upgrade regression:** ansible-core 2.16 in the
-  old env fails identically. Roles that need hardware facts:
-  `roles/nhc/templates/nhc.conf.j2` (`ansible_memtotal_mb`); the slurm.conf
-  template uses only the custom facts.
-- Fix options: (a) raise the soft `nofile` limit for login sessions on the
-  nodes, e.g. `/etc/security/limits.d/90-nofile.conf` with
+  old env fails identically. slurm.conf uses only the custom facts
+  (`ansible_local`). NHC `check_hw_physmem` now uses
+  `ansible_local.memory.total_mb` (already 95% of MemTotal; the template
+  divides by 0.95 so the ±5% window is the same as before) and the
+  commented `check_hw_eth` loop is gone.
+- Fix options: (a) `ansible_gather_subset: [min]` on `slurm-cluster` so
+  implicit gather never runs the mount collector (see Facts gathering);
+  **done** in group_vars. (b) raise the soft `nofile` limit for login
+  sessions, e.g. `/etc/security/limits.d/90-nofile.conf` with
   `* soft nofile 65536` (hard limit is already 1048576; new ssh sessions
-  only, so let Ansible's 5-minute control sockets expire first). Nothing in
-  the repo manages limits today; this would be a small site addition.
-  (b) `gather_subset: "!hardware"` for playbooks that do not need hardware
-  facts (works, verified), not usable for nhc.yml. Prefer (a).
-- Until fixed, run `--check` tests against nodes with few mounts
-  (herakles, eudoxus, alanturing) and treat a gaia fact-gathering failure as
-  this issue, not as a playbook problem.
+  only, so let Ansible's 5-minute control sockets expire first). (b) is
+  still needed for unfiltered `setup` and ad-hoc `-m setup`. Nothing in
+  the repo manages limits today.
+- With (a) in place, `--check` on gaia should get past fact gathering.
+  A failure that still mentions `udevadm` / `Errno 24` is an explicit
+  `setup` without `min` (or a stale full fact cache); `--flush-cache` once
+  if the cache predates the subset.
 
 ### Top-level playbook wiring (chunk 4e)
 
