@@ -16,10 +16,3 @@
     group: root
     mode: 0755
 
-- name: install motd sysinfo
-  template:
-    src: "{{ motd_sysinfo_template }}"
-    dest: /etc/update-motd.d/50-landscape-sysinfo
-    owner: root
-    group: root
-    mode: 0755

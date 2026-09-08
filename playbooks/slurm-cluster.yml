@@ -28,7 +28,9 @@
   when: chrony_install|default(true)
 
 - name: Set up a local cluster container registry
-  import_playbook: container/standalone-container-registry.yml hostlist=slurm-master
+  import_playbook: container/standalone-container-registry.yml
+  vars:
+    hostlist: slurm-master
   when: slurm_enable_container_registry|default(true)
 
 - name: Set up NGINX-based container caching | Install docker registry cache server
@@ -75,11 +77,15 @@
   when: slurm_enable_nfs_client_nodes
 
 - name: Install DCGM
-  import_playbook: nvidia-software/nvidia-dcgm.yml hostlist=slurm-node
+  import_playbook: nvidia-software/nvidia-dcgm.yml
+  vars:
+    hostlist: slurm-node
   when: install_dcgm|default(false)
 
 - name: Install Node Health Check
-  import_playbook: slurm-cluster/nhc.yml hostlist=slurm-node
+  import_playbook: slurm-cluster/nhc.yml
+  vars:
+    hostlist: slurm-node
   when: slurm_install_nhc|default(false)
 
 - name: Create software/data mounts (kosmos)

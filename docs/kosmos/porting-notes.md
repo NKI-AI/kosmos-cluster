@@ -398,12 +398,11 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   the monitoring section installs docker-ce on every host, which fails on
   herakles (podman-docker) and upgrades docker on gaia and eudoxus (5b);
   the inline `hostlist=` on three `import_playbook` lines is ignored, so
-  NHC and DCGM also target atlas and kosmos (4e); the apptainer role fails
+  NHC and DCGM also targeted atlas and kosmos (4e, fixed); the apptainer role fails
   on gaia and aristarchus, which run newer versions than the pin (4c).
 - **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
   dead per-host overrides in host_vars silently ignored (5a); nvtop builds an
-  unpinned git HEAD (4b); the motd role downgrades Ubuntu's
-  `50-landscape-sysinfo` (4b).
+  unpinned git HEAD (4b).
 - **Cleanup when convenient:** everything else below.
 
 ### Slurm role (commit c9d86ffc)
@@ -457,10 +456,12 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   Ubuntu's old, pre-caching `50-landscape-sysinfo` script with no site
   content. On all ten nodes that path is now a symlink to
   `/usr/share/landscape/landscape-sysinfo.wrapper`, the newer caching
-  version (LP #1893716). The role replaces the symlink with the older
-  script on every run. Fix: drop the sysinfo task and template from the
-  role and keep only the header (corrected 2026-09-08; the earlier note
-  treated the package update as the problem).
+  version (LP #1893716). The role replaced the symlink with the older
+  script on every run. **Fixed 2026-09-08:** the sysinfo task and template
+  are gone, the role only installs the header. The "disable current motd"
+  task chmods regular files only, so the symlink keeps working; on a node
+  where the file is still a regular file (pre-2026 landscape-common) it
+  gets disabled until the package updates.
 
 ### Apptainer (chunk 4c)
 
@@ -552,8 +553,9 @@ area has several leftovers that need a decision (update or remove).
   `slurm_enable_container_registry: false`. Same lines in upstream 26.07,
   so an upstream bug. The `vars: hostlist:` form used elsewhere in the file
   works. Never showed in testing because every check run used
-  `--limit slurm-node`. Fix before the first unlimited run: switch the three
-  lines to the `vars:` form.
+  `--limit slurm-node`. **Fixed 2026-09-08:** the three lines use the
+  `vars:` form; `--list-hosts` now shows NHC and DCGM on slurm-node and the
+  registry on slurm-master.
 - `bootstrap-ssh.yml` and `bootstrap-sudo.yml` are disabled by commenting
   them out in `playbooks/slurm-cluster.yml`, as on master (joren,
   2024-06-05). Decided 2026-09-04: keep both disabled. ssh to the compute
