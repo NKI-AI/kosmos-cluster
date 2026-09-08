@@ -13,8 +13,9 @@
 > ansible-galaxy install -r roles/requirements.yml
 > ```
 >
-> Then run playbooks with `-K` (sudo on the nodes needs a password). Keep your clone in
-> sync with git; there is no shared checkout.
+> Then run playbooks with `-K` (sudo on the nodes needs a password). Each admin works from
+> their own clone (home directory or wherever), pulls the latest changes before running
+> playbooks, and submits their own changes as pull requests.
 
 Infrastructure automation tools for Kubernetes and Slurm clusters with NVIDIA GPUs.
 
