@@ -156,7 +156,11 @@ checkout; each admin works from a private clone, pulls before running
 playbooks, and submits changes as pull requests. Galaxy roles and collections
 stay out of git (vendoring the 44 MB was considered and rejected);
 `roles/requirements.yml` pins every version and is the lock file, and each
-clone installs them once with the command in the README.
+clone installs them once with the command in the README. Verified
+2026-09-08: README steps, `kinit`, ad-hoc ping of all compute nodes, and
+`prometheus-node-exporter.yml` in check mode on eudoxus with
+`-e '{"docker_install": false}'` (facts served from the per-user cache on
+the second run).
 
 ## Check-run results
 
