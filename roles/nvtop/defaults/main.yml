@@ -1,2 +1,6 @@
 ---
 nvtop_github_url: https://github.com/Syllo/nvtop.git
+# Release tag to build. Ubuntu 22.04 packages nvtop 1.2.2, too old for
+# current GPUs, hence the build from source. Check the tag builds with the
+# nodes' cmake (3.22 on 22.04) before bumping.
+nvtop_version: "3.3.2"

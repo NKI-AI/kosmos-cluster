@@ -26,9 +26,10 @@ IT), with Kerberos**, so `slurm.yml` is no longer blocked; atlas still
 needs `-k` (no host principal in the realm, see "Running playbooks from
 teuwen-ansible"). gaia's open-files problem is bypassed by gathering only
 the `min` fact subset (096cc2ec). Decided: docker pinned to 28.3
-(deviation 13), motd landscape task removed. Still pending with the admins:
-nvtop pin, herakles driver metapackages/reboot, apptainer pin,
-podman-docker on herakles, joining atlas to the realm. Everything on
+(deviation 13), motd landscape task removed, nvtop pinned to 3.3.2
+(deviation 15). Still pending with the admins: herakles driver
+metapackages/reboot, apptainer pin, podman-docker on herakles, joining
+atlas to the realm. Everything on
 `master` up to e812a659 has been ported, dropped with a row below, or
 superseded upstream.
 
@@ -437,6 +438,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 12 | `playbooks/slurm-cluster/slurm.yml`, `config/group_vars/slurm-cluster.yml` | the "Add SSH public key to root user authorized keys" task runs only when `slurm_add_root_ssh_key` is true (site config: false) | upstream: unconditional (since 2020) | The play puts the running admin's `~/.ssh/id_rsa.pub` into root's `authorized_keys` on every compute node, and fails when that file does not exist. Neither is wanted here: no playbook logs in as root (Ansible connects as the admin over Kerberos and uses sudo), and the play's purpose, getting past pam_slurm_adopt, does not apply because the admin groups are in `/etc/localgroups`. Flip: set the variable to true and provide a key | chunk 7 |
 | 13 | `config/group_vars/all.yml` | pins `docker_version: '28.3'` and `docker_containerd_version: '1.6.32'` | no pin (the `docker_version` line is commented out), so whatever kubespray defaults to applies | The nine docker nodes run `docker-ce 5:26.1.2` and `containerd.io 1.6.28-2`, installed when the old kubespray defaulted to 26.1; without a pin the version silently follows every submodule bump. 28.3 / 1.6.32 are the 26.07 (kubespray 2.31) defaults. Chosen 2026-09-08 over pinning the running versions (26.1 and 1.6.28 are both still in kubespray's table) so the cluster sits on a supported release rather than the smallest diff. Consequence: the first real run upgrades docker-ce 26.1.2 -> 28.3.3 and containerd.io 1.6.28-2 -> 1.6.32-1 on nine nodes, restarting docker and the exporter containers, so it must run in a scheduled patch window, not on the live cluster. herakles needs `podman-docker` removed first. Note the docker role reads `docker_containerd_version`, not `containerd_version`. Flip: comment both lines out | (this change) |
 | 14 | `config/inventory`, `config/host_vars/*`, `config/group_vars/slurm-cluster.yml`, `roles/slurm/templates/etc/slurm/slurm.conf` | partition membership is an inventory group per partition (`partition_a100` etc.); the template loops over `partition_settings` and takes each partition's nodes from `groups`; the `MaxTime` guard tests the partition value it prints; eight host_vars files that only named a partition are deleted and the dead keys removed from the other six; the unused top-level `slurm_max_job_timelimit` is gone | master: `slurm_partition_name` in every host's host_vars, next to `slurm_def_mem_per_cpu` and (five hosts) `slurm_max_job_timelimit`, which nothing reads; the template builds the partition-to-node map with Jinja dict tricks under `# TODO create this as a fact`; the `MaxTime` guard tested the top-level variable, so deleting that line would have made every partition `MaxTime=INFINITE` | The per-host memory and time-limit values were the first draft of the site config (f81872c5, 2024-06-03), superseded the same day by `partition_settings` (a99cfa0d) and never read since; Slurm has no per-node form of either setting, so they could not have been honoured. Membership as inventory groups shows the whole layout in one file and removes the template TODO. Rendered slurm.conf before and after (2026-09-08, `docs/kosmos/render-slurm-conf.yml`): every `PartitionName` line identical apart from partition order (now the order of `partition_settings`) and node order within a6000 (now alphabetical). Flip: `git checkout master -- config/host_vars roles/slurm/templates/etc/slurm/slurm.conf`, delete the `partition_*` groups and re-add the dead keys | 2026-09-08 |
+| 15 | `roles/nvtop`, `playbooks/slurm-cluster/nvtop.yml` | `nvtop_version: "3.3.2"` (role default) checked out as a git tag; the build runs only when `nvtop --version` does not already report that version (the version command has `check_mode: false`, so check runs are accurate); the playbook includes the role only on nodes whose `gpus` custom fact is non-zero | master: clones and builds whatever GitHub HEAD is that day on every run, on every slurm-node including gaia; cmake / make install report "changed" each time | Unpinned HEAD gave different checkouts per node (all 3.1.0-based in 2026-09) and a non-idempotent role. 3.3.2 (2026-02-08) is the newest release; nvtop is a monitoring tool outside the job path, so the version bump is low risk, and Ubuntu 22.04's 1.2.2 is why the role exists. Decided 2026-09-08. Flip: set `nvtop_version` to `3.1.0` in group_vars to stay on the current release, or `git checkout master -- roles/nvtop playbooks/slurm-cluster/nvtop.yml` | 2026-09-08 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -547,8 +549,9 @@ and Slurm is upgraded. Everything below waits for that day; until then only
    herakles driver metapackages and reboot (Check-run results,
    2026-09-04); podman-docker vs docker-ce on herakles and the docker
    upgrade on gaia and eudoxus (5b); apptainer pin and version drift (4c);
-   nofile limit on gaia (facts gathering); the first full run of
-   `playbooks/slurm-cluster.yml`.
+   nofile limit on gaia (facts gathering); the first real run of
+   `nvtop.yml`, which rebuilds nvtop 3.3.2 on the nine GPU nodes
+   (deviation 15); the first full run of `playbooks/slurm-cluster.yml`.
 - **Ansible node access, not blocking:** atlas has no Kerberos host
   principal, so any `slurm.yml` run that includes atlas still needs `-k`.
   Join it to the realm
@@ -560,10 +563,9 @@ and Slurm is upgraded. Everything below waits for that day; until then only
   NHC and DCGM also targeted atlas and kosmos (4e, fixed); the apptainer role fails
   on gaia and aristarchus, which run newer versions than the pin (4c).
 - **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
-  nvtop builds an unpinned git HEAD (4b).
-  (The dead per-host overrides in host_vars, 5a, are fixed on this branch:
-  deviation 14. Fact gathering from `groups['all']` is fixed: see Facts
-  gathering.)
+  (Fixed on this branch: the dead per-host overrides in host_vars, 5a,
+  deviation 14; the unpinned nvtop build, 4b, deviation 15; fact
+  gathering from `groups['all']`, see Facts gathering.)
 - **Cleanup when convenient:** everything else below.
 
 ### Slurm role (commit c9d86ffc)
@@ -617,16 +619,22 @@ and Slurm is upgraded. Everything below waits for that day; until then only
 
 ### nvtop and motd (chunk 4b)
 
-- `roles/nvtop` clones the Syllo/nvtop GitHub repository with `update: yes`
-  and builds whatever HEAD is that day. Nodes can end up on different
-  versions, and the cmake / make install tasks report "changed" on every run.
-  Pinning a tag would fix both. State 2026-09-08: every node reports 3.1.0,
-  but the checkouts differ (gaia `3.1.0-100-gf901275`, all others
-  `3.1.0-9-g0316ce1`), so the drift is real. Reason the role exists: Ubuntu
-  22.04's packaged nvtop is 1.2.2, too old for current GPUs.
-- `playbooks/slurm-cluster/nvtop.yml` sets a `has_gpus` fact from the custom
-  `gpus` fact, but the nvtop role never reads it, so nvtop is also built on
-  CPU-only nodes such as gaia.
+- **Fixed 2026-09-08 (deviation 15).** `roles/nvtop` cloned the Syllo/nvtop
+  GitHub repository with `update: yes` and built whatever HEAD was that
+  day; nodes ended up on different checkouts (gaia `3.1.0-100-gf901275`,
+  all others `3.1.0-9-g0316ce1`, all reporting 3.1.0) and the cmake / make
+  install tasks reported "changed" on every run. Now: `nvtop_version`
+  (role default `3.3.2`, the newest release, 2026-02-08; builds with the
+  nodes' cmake 3.22) is checked out as a tag, and the whole build is
+  skipped when `nvtop --version` already reports that version, so the role
+  is idempotent and check mode shows the truth. Reason the role exists:
+  Ubuntu 22.04's packaged nvtop is 1.2.2, too old for current GPUs. The
+  first real run of `nvtop.yml` rebuilds nvtop on the nine GPU nodes
+  (maintenance day).
+- Fixed 2026-09-08 (deviation 15): `playbooks/slurm-cluster/nvtop.yml`
+  set a `has_gpus` fact that nothing read, so nvtop was also built on
+  gaia. The role is now included only when the fact is set; gaia keeps
+  the 3.1.0 binary it has and is otherwise left alone.
 - `roles/motd/templates/50-landscape-sysinfo.yml.j2` is a verbatim copy of
   Ubuntu's old, pre-caching `50-landscape-sysinfo` script with no site
   content. On all ten nodes that path is now a symlink to

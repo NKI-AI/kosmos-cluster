@@ -9,6 +9,8 @@
       set_fact:
         has_gpus: true
       when: ansible_local['gpus']['count']
+    # kosmos: only GPU nodes; nvtop has nothing to show on gaia.
     - name: install nvtop
       include_role:
         name: nvtop
+      when: has_gpus | default(false)

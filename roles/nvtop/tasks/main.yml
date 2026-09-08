@@ -12,74 +12,77 @@
     state: present
   when: ansible_os_family == "Debian"
 
-- name: create nvtop source dir
-  file:
-    path: /usr/local/src/nvtop
-    state: directory
+# Read-only, so it also runs in check mode; otherwise check mode would
+# always show a rebuild (a skipped command registers rc 0 and empty stdout).
+- name: check installed nvtop version
+  command: nvtop --version
+  register: nvtop_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
   tags: nvtop
 
-- name: clone nvtop
-  become: yes
-  git:
-    repo: "{{ nvtop_github_url }}"
-    dest: /usr/local/src/nvtop
-    clone: yes
-    update: yes
+- name: "build and install nvtop {{ nvtop_version }}"
+  when: nvtop_installed.rc != 0 or nvtop_installed.stdout != "nvtop version " ~ nvtop_version
   tags: nvtop
+  block:
 
-- name: create nvtop build dir
-  become: yes
-  file:
-    path: /usr/local/src/nvtop/build
-    state: directory
-  tags: nvtop
+  - name: create nvtop source dir
+    file:
+      path: /usr/local/src/nvtop
+      state: directory
 
-- name: cmake nvtop
-  become: yes
-  command:
-    chdir: /usr/local/src/nvtop/build
-    argv:
-      - cmake
-      - ..
-      - -DNVIDIA_SUPPORT=ON
-      - -DAMDGPU_SUPPORT=OFF
-      - -DINTEL_SUPPORT=OFF
-      - -DMSM_SUPPORT=OFF
-      - -DPANFROST_SUPPORT=OFF
-      - -DPANTHOR_SUPPORT=OFF
-      - -DV3D_SUPPORT=OFF
-  register: result
-#  changed_when: "result.stdout != \"make: Nothing to be done for 'all'.\""
-  tags: nvtop
+  - name: clone nvtop
+    become: yes
+    git:
+      repo: "{{ nvtop_github_url }}"
+      dest: /usr/local/src/nvtop
+      version: "{{ nvtop_version }}"
+      clone: yes
+      update: yes
 
-- name: make nvtop
-  become: yes
-  command:
-    chdir: /usr/local/src/nvtop/build
-    argv:
-      - make
-      - -j
-  register: result
-  changed_when: "result.stdout != \"make: Nothing to be done for 'all'.\""
-  tags: nvtop
+  - name: create nvtop build dir
+    become: yes
+    file:
+      path: /usr/local/src/nvtop/build
+      state: directory
 
-- name: install nvtop
-  become: yes
-  command:
-    chdir: /usr/local/src/nvtop/build
-    argv:
-      - make
-      - install
-  register: result
-#  changed_when: "result.stdout != \"make: Nothing to be done for 'all'.\""
-  tags: nvtop
+  - name: cmake nvtop
+    become: yes
+    command:
+      chdir: /usr/local/src/nvtop/build
+      argv:
+        - cmake
+        - ..
+        - -DNVIDIA_SUPPORT=ON
+        - -DAMDGPU_SUPPORT=OFF
+        - -DINTEL_SUPPORT=OFF
+        - -DMSM_SUPPORT=OFF
+        - -DPANFROST_SUPPORT=OFF
+        - -DPANTHOR_SUPPORT=OFF
+        - -DV3D_SUPPORT=OFF
 
-- name: clean nvtop source directory
-  become: yes
-  command:
-    chdir: /usr/local/src/nvtop/build
-    argv:
-      - make
-      - clean
-  ignore_errors: true
-  tags: nvtop
+  - name: make nvtop
+    become: yes
+    command:
+      chdir: /usr/local/src/nvtop/build
+      argv:
+        - make
+        - -j
+
+  - name: install nvtop
+    become: yes
+    command:
+      chdir: /usr/local/src/nvtop/build
+      argv:
+        - make
+        - install
+
+  - name: clean nvtop source directory
+    become: yes
+    command:
+      chdir: /usr/local/src/nvtop/build
+      argv:
+        - make
+        - clean
+    ignore_errors: true
