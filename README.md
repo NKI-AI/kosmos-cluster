@@ -3,6 +3,18 @@
 > **Kosmos fork (NKI AI for Oncology):** this branch is upstream DeepOps 26.07 plus a small
 > overlay for the KOSMOS Slurm cluster. Read [docs/kosmos/porting-notes.md](docs/kosmos/porting-notes.md)
 > before running anything: it lists every deviation from upstream and the open issues.
+>
+> **Setup on teuwen-ansible** (the shared venv already exists; do not run `scripts/setup.sh`,
+> it rebuilds that venv for everyone):
+>
+> ```bash
+> git clone git@github.com:NKI-AI/kosmos-cluster.git ~/kosmos-cluster && cd ~/kosmos-cluster
+> source /opt/kosmos-cluster/env-26.07/bin/activate
+> ansible-galaxy install -r roles/requirements.yml
+> ```
+>
+> Then run playbooks with `-K` (sudo on the nodes needs a password). Keep your clone in
+> sync with git; there is no shared checkout.
 
 Infrastructure automation tools for Kubernetes and Slurm clusters with NVIDIA GPUs.
 
