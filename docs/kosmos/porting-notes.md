@@ -45,6 +45,12 @@ Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
    the fact-cache warning below. The script also appends a `source .../activate`
    line to your `.bashrc`.
 2. `source /opt/kosmos-cluster/env-26.07/bin/activate` for everything below.
+   Every other admin: follow the setup block at the top of the README (own
+   clone, activate this venv, `ansible-galaxy install -r roles/requirements.yml`,
+   which installs both roles and collections into the paths from
+   `ansible.cfg`). Nobody runs `scripts/setup.sh` on teuwen-ansible except to
+   deliberately rebuild the shared venv: it pip-installs into that venv, needs
+   sudo for apt, and re-downloads the Galaxy content with `--force`.
 3. Fix the default partition (section 2, "Urgent"). Done: `rtx2080ti`.
 4. herakles: included in the tests as a normal node (decided 2026-09-04;
    see section 2, "Site config" for what a real run would change on it).
@@ -144,6 +150,13 @@ identity for free.
 `/opt/kosmos-cluster/env-26.07` (ansible-core 2.17, this branch). Both stay
 until the merge; then the old one goes. The root disk of teuwen-ansible was
 95 % full (1.6 GB free) on 2026-09-04.
+
+**Setup decision (2026-09-08):** only the venv is shared. There is no shared
+checkout; each admin works from a private clone, pulls before running
+playbooks, and submits changes as pull requests. Galaxy roles and collections
+stay out of git (vendoring the 44 MB was considered and rejected);
+`roles/requirements.yml` pins every version and is the lock file, and each
+clone installs them once with the command in the README.
 
 ## Check-run results
 
@@ -299,7 +312,7 @@ ansible-playbook -K --check --diff --limit 'slurm-node:!gaia' \
 | 0a | `ansible.cfg` | `pipelining = True` (upstream) | `pipelining = False` (EricMarcus-ai, 2024-06-03, "Disable ansible pipelining", no reason given) | Pipelining halves the SSH round-trips per task. It only fails when sudo enforces `requiretty`, which the nodes do not (checked on gaia). Flip: set `pipelining = False` | (not applied, branch keeps upstream) |
 | 0b | `ansible.cfg` | no `[galaxy]` section (upstream) | `[galaxy] server = https://old-galaxy.ansible.com/` (Musab, 2023-11-02) | Temporary workaround from the late-2023 Galaxy migration; the host no longer serves content and 26.07 requirements resolve on galaxy.ansible.com. Flip: re-add the section | (not applied, branch keeps upstream) |
 | 0c | `ansible.cfg` | no `control_path` override: ssh control sockets go to Ansible's default `~/.ansible/cp`, which Ansible creates itself | upstream (since the 2018 initial commit, no reason given): `control_path = ~/.ssh/ansible-%%r@%%h:%%p` | With the upstream setting Ansible fails on a fresh account until `~/.ssh` exists, and nothing creates it (`UserKnownHostsFile=/dev/null` in the same file means ssh never writes `known_hosts` there either). Bit kosmas-ans on 2026-09-03. Where the sockets live makes no functional difference. Flip: restore the line and `mkdir -m 700 ~/.ssh` | chunk 7 |
-| 1 | `scripts/setup.sh` | venv default `/opt/kosmos-cluster/env` | venv in `./env` (upstream default) | Shared checkout and venv on teuwen-ansible, one environment for all admins | b084b7f1 |
+| 1 | `scripts/setup.sh` | venv default `/opt/kosmos-cluster/env` | venv in `./env` (upstream default) | Shared venv on teuwen-ansible, one Ansible for all admins; clones are per admin (decided 2026-09-08, see "Setup decision") | b084b7f1 |
 | 1b | `.github/workflows/setup.yml` | activates `/opt/kosmos-cluster/env` | upstream activates `/opt/deepops/env` (master still has the 23.08 workflows) | Follows deviation 1; the CI job failed on every push until the path matched. Flip together with deviation 1 | chunk 6 |
 | 2 | `roles/{slurm,nhc,nvidia-dcgm-exporter,nginx-docker-registry-cache,standalone-container-registry,pyxis}/defaults/main.yml` | untouched upstream files | overrides build/config paths to `/opt/kosmos-cluster/...`, `slurm_cluster_name: kosmos`, `standalone_container_registry_name: kosmos-registry`, `slurm_pyxis_version: 0.19.0` | Site values belong in `config/group_vars`, not in vendored roles. All of them are now set in `config/group_vars/{all,slurm-cluster}.yml`, derived from `deepops_dir` | c9d86ffc, chunk 5b |
 | 3 | `roles/slurm/templates/etc/slurm/slurm.conf` | `KillWait=120` (upstream 26.07 value) | `KillWait=30` | 30 was the 23.08 default, not a site choice. Upstream raised it in Sept 2024 for more graceful job termination. Behavior change: jobs get 120 s instead of 30 s between SIGTERM and SIGKILL. Flip: set `KillWait=30` in the template | c9d86ffc |
@@ -355,8 +368,8 @@ in the table above where a flip is possible.
   nginx cache proxy `0.6.4` -> `0.6.5`: both features are off in site config.
 - Galaxy roles/collections move to the 26.07 pins (`ansible.posix`,
   `community.general`, `community.docker`, `devsec.hardening` replaces the
-  old `dev-sec` roles). Run `scripts/setup.sh` or `ansible-galaxy install`
-  against the new requirements before the first run.
+  old `dev-sec` roles). Run `ansible-galaxy install -r roles/requirements.yml`
+  in your clone before the first run (README setup block).
 
 ## 2. Things to address after the port
 
@@ -465,9 +478,10 @@ area has several leftovers that need a decision (update or remove).
 - `ansible.cfg` sets `fact_caching_connection = /var/tmp/ansible_cache`, but
   on teuwen-ansible that directory is `root:teu-ansible` mode 0700, so every
   admin gets "error in 'jsonfile' cache ... disabling plugin" and facts are
-  gathered on every run instead of being cached. Harmless, but slow. Fix
-  once the shared setup is decided: make the directory group-writable for the
-  admin group, or point the cache at a per-user path.
+  gathered on every run instead of being cached. Harmless, but slow. Now that
+  clones are per admin (setup decision, 2026-09-08), the cleanest fix is a
+  per-user path, e.g. `fact_caching_connection = ~/.ansible/fact_cache`;
+  making the directory group-writable for the admin group also works.
 
 ### Fact gathering fails on nodes with many NFS submounts (found 2026-09-04)
 
