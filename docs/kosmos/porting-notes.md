@@ -638,7 +638,9 @@ area has several leftovers that need a decision (update or remove).
     list these gaps per node; that output is the to-do list for bringing the
     nodes back in line.
 - `slurm_password` / `slurm_db_password` are still the upstream placeholder
-  strings, on master and here. They should live in an Ansible vault.
+  strings, on master and here. They should live in an Ansible vault. **NOTE**:
+  this is addressed in `docs/kosmos/slurm-secrets-vaults.md`. Passwords
+  should be stored in a vault which all admins have access to.
 - Decisions, not defects: NHC runs with the role's default `nhc.conf`
   template (the example recommends a site `nhc_config_template`), and
   `slurm_enable_monitoring: true` with an empty `[slurm-metric]` group means
