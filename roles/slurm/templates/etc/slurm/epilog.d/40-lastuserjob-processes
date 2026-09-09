@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -ex
 
+# Sibling 41-lastuserjob-ssh already consults this list before it touches a
+# user, so that operator accounts do not lose access when their job ends.
+# `killall -9 -u` is broader than anything 41 does -- it reaps every process
+# the user owns on this node, including their interactive login shell and its
+# sshd session -- so it has to honour the same exemption.
+#
+# Without this an operator who submits from a login shell on a compute node is
+# disconnected the moment the job's epilog runs.
+if grep -q -w "$SLURM_JOB_USER" /etc/slurm/localusers.backup ; then
+    exit 0  # don't kill these users' login sessions
+fi
+
 if [ "$SLURM_JOB_USER" != root ]; then
     if killall -9 -u "$SLURM_JOB_USER" ; then
         logger -s -t slurm-epilog 'Killed residual user processes'
