@@ -27,13 +27,27 @@ case "$1" in
             exit 1
         fi
 
-        # Every GPU that nvidia-smi lists has to be present in the query result
-        # before anything is written.
-        if ! expected=$(nvidia-smi -L | grep -c '^GPU '); then
-            echo "$0: could not determine the number of GPUs" >&2
+        # Every GPU that nvidia-smi lists has to be present in the query
+        # result before anything is written. The listing is captured on its
+        # own: in "$(nvidia-smi -L | grep -c ...)" the status belongs to
+        # grep, so a partial listing followed by a nonzero nvidia-smi exit
+        # counted the rows it did emit and passed validation.
+        if ! gpu_list=$(nvidia-smi -L); then
+            echo "$0: could not list the GPUs" >&2
+            exit 1
+        fi
+        expected=$(printf '%s\n' "$gpu_list" | grep -c '^GPU ') || expected=0
+        if [ "$expected" -eq 0 ]; then
+            echo "$0: nvidia-smi -L reported no GPUs" >&2
             exit 1
         fi
 
+        # Rows are counted as they are read rather than with bash's
+        # array-length expansion. These files are installed with the template
+        # module, and the brace-hash sequence that expansion needs opens a
+        # Jinja comment, so the render fails with "Missing end of comment tag"
+        # before the script can run.
+        rows=0
         indexes=()
         maxMEM=()
         maxSM=()
@@ -48,10 +62,11 @@ case "$1" in
             indexes+=("$index")
             maxMEM+=("$mem")
             maxSM+=("$sm")
+            rows=$((rows + 1))
         done < "$tmp"
 
-        if [ "${#indexes[@]}" -ne "$expected" ]; then
-            echo "$0: got ${#indexes[@]} usable clock rows, expected $expected" >&2
+        if [ "$rows" -ne "$expected" ]; then
+            echo "$0: got $rows usable clock rows, expected $expected" >&2
             exit 1
         fi
 
