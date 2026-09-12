@@ -32,7 +32,7 @@ def main():
         templates = os.path.join(roles_dir, role, "templates")
         if not os.path.isdir(templates):
             continue
-        env = Environment(loader=FileSystemLoader(templates))
+        env = Environment(loader=FileSystemLoader(templates), autoescape=True)
         for root, _, files in os.walk(templates):
             for name in sorted(files):
                 rel = os.path.relpath(os.path.join(root, name), templates)
