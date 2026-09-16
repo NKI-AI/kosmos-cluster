@@ -2,11 +2,40 @@
 # ansible role to setup motd prompt
 #
 ---
-- name: disable current motd
-  become: yes
-  command: find /etc/update-motd.d -type f -exec chmod 0000 {} \;
+- name: find motd scripts to disable
+  find:
+    paths: /etc/update-motd.d
+    file_type: file
+    excludes: "{{ ['00-header', motd_sysinfo_file] + motd_keep_executable }}"
+  register: motd_other_scripts
   tags: motd
 
+- name: disable other motd scripts
+  file:
+    path: "{{ item.path }}"
+    mode: "0000"
+  loop: "{{ motd_other_scripts.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  tags: motd
+
+# kosmos: 50-landscape-sysinfo is a symlink into the landscape-common
+# package, so the find above skips it and the chmod lands on its target,
+# /usr/share/landscape/landscape-sysinfo.wrapper. A landscape-common upgrade
+# restores that file's mode; rerunning this role disables it again.
+- name: check for landscape-sysinfo
+  stat:
+    path: /etc/update-motd.d/50-landscape-sysinfo
+  register: motd_landscape
+  tags: motd
+
+- name: disable landscape-sysinfo
+  file:
+    path: /etc/update-motd.d/50-landscape-sysinfo
+    mode: "0000"
+    follow: true
+  when: motd_landscape.stat.exists
+  tags: motd
 
 - name: install motd header
   template:
@@ -14,5 +43,14 @@
     dest: /etc/update-motd.d/00-header
     owner: root
     group: root
-    mode: 0755
+    mode: "0755"
+  tags: motd
 
+- name: install motd sysinfo
+  copy:
+    src: "{{ motd_sysinfo_file }}"
+    dest: "/etc/update-motd.d/{{ motd_sysinfo_file }}"
+    owner: root
+    group: root
+    mode: "0755"
+  tags: motd

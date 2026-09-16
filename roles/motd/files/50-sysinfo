@@ -1,0 +1,16 @@
+#!/bin/sh
+# Fast replacement for landscape-sysinfo: same facts, no Python.
+read -r load1 _ < /proc/loadavg
+disk=$(df --output=pcent,size -B1G / | awk 'NR==2 {print $1, $2}')
+disk_pct=${disk% *}
+disk_size=${disk#* }
+mem_pct=$(awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{printf "%d", (t-a)*100/t}' /proc/meminfo)
+swap_pct=$(awk '/^SwapTotal:/{t=$2} /^SwapFree:/{f=$2} END{if(t>0) printf "%d", (t-f)*100/t; else print 0}' /proc/meminfo)
+procs=$(find /proc -maxdepth 1 -name '[0-9]*' | wc -l)
+users=$(who | cut -d' ' -f1 | sort -u | wc -l)
+ip=$(hostname -I 2>/dev/null | cut -d' ' -f1)
+printf '\n System information as of %s\n\n' "$(date)"
+printf '  System load:  %-18s Processes:        %s\n' "$load1" "$procs"
+printf '  Usage of /:   %-18s Users logged in:  %s\n' "$disk_pct of ${disk_size}GB" "$users"
+printf '  Memory usage: %-18s IPv4 address:     %s\n' "${mem_pct}%" "$ip"
+printf '  Swap usage:   %s\n' "${swap_pct}%"

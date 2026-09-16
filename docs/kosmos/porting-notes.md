@@ -27,7 +27,8 @@ needs `-k` (no host principal in the realm, see "Running playbooks from
 teuwen-ansible"). gaia's open-files problem is bypassed by gathering only
 the `min` fact subset (096cc2ec). Decided: docker pinned to 28.3
 (deviation 13), motd landscape task removed, nvtop pinned to 3.3.2
-(deviation 15). Still pending with the admins: herakles driver
+(deviation 15), landscape-sysinfo replaced by a shell script in the motd
+role (deviation 17, 2026-09-16). Still pending with the admins: herakles driver
 metapackages/reboot, apptainer pin, podman-docker on herakles, joining
 atlas to the realm. Everything on
 `master` up to e812a659 has been ported, dropped with a row below, or
@@ -440,6 +441,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 14 | `config/inventory`, `config/host_vars/*`, `config/group_vars/slurm-cluster.yml`, `roles/slurm/templates/etc/slurm/slurm.conf` | partition membership is an inventory group per partition (`partition_a100` etc.); the template loops over `partition_settings` and takes each partition's nodes from `groups`; the `MaxTime` guard tests the partition value it prints; eight host_vars files that only named a partition are deleted and the dead keys removed from the other six; the unused top-level `slurm_max_job_timelimit` is gone | master: `slurm_partition_name` in every host's host_vars, next to `slurm_def_mem_per_cpu` and (five hosts) `slurm_max_job_timelimit`, which nothing reads; the template builds the partition-to-node map with Jinja dict tricks under `# TODO create this as a fact`; the `MaxTime` guard tested the top-level variable, so deleting that line would have made every partition `MaxTime=INFINITE` | The per-host memory and time-limit values were the first draft of the site config (f81872c5, 2024-06-03), superseded the same day by `partition_settings` (a99cfa0d) and never read since; Slurm has no per-node form of either setting, so they could not have been honoured. Membership as inventory groups shows the whole layout in one file and removes the template TODO. Rendered slurm.conf before and after (2026-09-08, `docs/kosmos/render-slurm-conf.yml`): every `PartitionName` line identical apart from partition order (now the order of `partition_settings`) and node order within a6000 (now alphabetical). Flip: `git checkout master -- config/host_vars roles/slurm/templates/etc/slurm/slurm.conf`, delete the `partition_*` groups and re-add the dead keys | 2026-09-08 |
 | 15 | `roles/nvtop`, `playbooks/slurm-cluster/nvtop.yml` | `nvtop_version: "3.3.2"` (role default) checked out as a git tag; the build runs only when `nvtop --version` does not already report that version (the version command has `check_mode: false`, so check runs are accurate); the playbook includes the role only on nodes whose `gpus` custom fact is non-zero | master: clones and builds whatever GitHub HEAD is that day on every run, on every slurm-node including gaia; cmake / make install report "changed" each time | Unpinned HEAD gave different checkouts per node (all 3.1.0-based in 2026-09) and a non-idempotent role. 3.3.2 (2026-02-08) is the newest release; nvtop is a monitoring tool outside the job path, so the version bump is low risk, and Ubuntu 22.04's 1.2.2 is why the role exists. Decided 2026-09-08. Flip: set `nvtop_version` to `3.1.0` in group_vars to stay on the current release, or `git checkout master -- roles/nvtop playbooks/slurm-cluster/nvtop.yml` | 2026-09-08 |
 | 16 | `config/group_vars/slurm-cluster.yml`, `roles/slurm/templates/etc/slurm/slurm.conf` | emits `SlurmctldParameters=reconfig_on_restart` when `slurm_version` is 25.11 or newer; the site variable can be overridden to false | upstream omits the parameter | With the shared slurm.conf, a controller restart after a configuration change must also make every slurmd reread the file. Slurm added `reconfig_on_restart` in 25.11. The version guard leaves the current 23.02 configuration unchanged and the override supports disabling it during a rolling upgrade. It is transitional: once every Kosmos daemon is permanently on 26.05 or newer and support for older versions is dropped, set the site variable unconditionally to true and remove the version check. Flip: set `slurm_enable_reconfig_on_restart: false` | (this change) |
+| 17 | `roles/motd` | `00-header` template without the fifteen unused `tput` colour lines; new `files/50-sysinfo`, a shell replacement for landscape-sysinfo, installed 0755; `50-landscape-sysinfo` set to mode 0000 (through the symlink, onto the package wrapper) instead of deleted; the disable step is `find` + `file` with a keep-list (`motd_keep_executable`, default `91-contract-ua-esm-status`) | master: `find -type f -exec chmod 0000` command on every run (never idempotent, also disabled the ESM status script), header with colour lines, its own copy of the old landscape-sysinfo script (dropped 2026-09-08, see section 2, chunk 4b) | Login latency measured on kosmos 2026-09-16: header 0.07-0.25 s, landscape-sysinfo 0.45-0.55 s on most logins, both on every ssh login before the shell; the shell script gives the same block in 0.05 s. Flip: `git checkout master -- roles/motd` | pending |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -552,7 +554,11 @@ and Slurm is upgraded. Everything below waits for that day; until then only
    upgrade on gaia and eudoxus (5b); apptainer pin and version drift (4c);
    nofile limit on gaia (facts gathering); the first real run of
    `nvtop.yml`, which rebuilds nvtop 3.3.2 on the nine GPU nodes
-   (deviation 15); the first full run of `playbooks/slurm-cluster.yml`.
+   (deviation 15); the first real run of `motd.yml` after deviation 17
+   (installs `50-sysinfo`, disables landscape-sysinfo and the colour lines
+   in `00-header` on every host, also atlas; verify with one ssh login per
+   node type: banner once, sysinfo block once); the first full run of
+   `playbooks/slurm-cluster.yml`.
 - **Ansible node access, not blocking:** atlas has no Kerberos host
   principal, so any `slurm.yml` run that includes atlas still needs `-k`.
   Join it to the realm
@@ -678,6 +684,25 @@ and Slurm is upgraded. Everything below waits for that day; until then only
   task chmods regular files only, so the symlink keeps working; on a node
   where the file is still a regular file (pre-2026 landscape-common) it
   gets disabled until the package updates.
+- **Superseded 2026-09-16 (deviation 17).** Measured on kosmos: pam_motd
+  runs `run-parts /etc/update-motd.d` on every ssh login, before the
+  shell. Of the three executable scripts, `00-header` took 0.07-0.25 s,
+  all of it in fifteen `$(tput ...)` colour variables that nothing used;
+  `50-landscape-sysinfo` took 0.45-0.55 s (Python/Twisted startup) on
+  every login where the caching wrapper did not short-circuit, which is
+  most logins; `91-contract-ua-esm-status` took 0.003 s. Now: the colour
+  lines are gone from the header template; `roles/motd/files/50-sysinfo`
+  is a shell script that prints the same block as landscape-sysinfo from
+  `/proc`, `df`, `who` and `hostname` in 0.05 s (tested on kosmos,
+  shellcheck clean); the role installs it at mode 0755 and sets
+  `50-landscape-sysinfo` to mode 0000 instead of deleting it (the chmod
+  follows the symlink onto the package's wrapper; a landscape-common
+  upgrade restores 0755 there and recreates the symlink either way, so the
+  role has to be rerun after such an upgrade). The `find ... chmod`
+  command task is replaced by `find` + `file` with an exclusion list
+  (`motd_keep_executable`, default `91-contract-ua-esm-status`) so the
+  role is idempotent and no longer disables its own files or the ESM
+  status script on each run. Decided not to remove landscape-common.
 
 ### Apptainer (chunk 4c)
 
