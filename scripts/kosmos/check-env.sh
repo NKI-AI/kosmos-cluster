@@ -2,7 +2,8 @@
 # Build a local Ansible environment for lint and syntax checks, off the cluster.
 #
 # Mirrors /opt/kosmos-cluster/env-26.07 on teuwen-ansible: the pip pins are
-# read from scripts/setup.sh (so they cannot drift), Python is 3.12 like
+# read from scripts/setup.sh (so they cannot drift), the rest are constrained
+# to that venv's `pip freeze`, Python is 3.12 like
 # Ubuntu 24.04, and the Galaxy roles and collections come from
 # roles/requirements.yml into this checkout, as in the README, plus the git
 # submodules. No sudo, no apt, no .bashrc edit. Needs uv.
@@ -36,7 +37,10 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 uv venv --quiet --clear --managed-python --python "${PYTHON_VERSION}" "${VENV_DIR}"
+# The constraints file is `pip freeze` of env-26.07 (2026-09-29): it pins the
+# packages setup.sh leaves unpinned. Refresh it when that venv is rebuilt.
 uv pip install --quiet --python "${VENV_DIR}/bin/python" \
+    --constraint "${ROOT_DIR}/scripts/kosmos/env-26.07-constraints.txt" \
     "ansible==$(pin ANSIBLE_VERSION)" \
     "ansible-lint==$(pin ANSIBLE_LINT_VERSION)" \
     "Jinja2==$(pin JINJA2_VERSION)" \
