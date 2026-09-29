@@ -141,11 +141,27 @@ gpu_clock_lock: "1507,1507"
 # Debugging var: force install NVIDIA driver even if GPU not detected
 nvidia_driver_force_install: false
 # Default NVIDIA driver branch for generic host driver installs.
-# kosmos: 580 matches the A6000/A100/H100 nodes; alanturing, hamilton and
-# roentgen pin 550 in config/host_vars (see docs/kosmos/porting-notes.md).
+# kosmos: one branch for every GPU node. 580 is NVIDIA's long-term support
+# branch and drives every GPU in nvidia_gpu_architectures below; on Ubuntu
+# 26.04 only 580 and 595 are real server branches (535/550/570 install 580).
+# See docs/kosmos/gpu-inventory.md.
 nvidia_driver_branch: "580"
 # Set true on Ubuntu systems that require NVIDIA open kernel modules.
 nvidia_driver_ubuntu_use_open_kernel_modules: false
+
+# kosmos: GPU architecture per PCI vendor:device ID, as reported by the gpus
+# custom fact (roles/facts/files/gpus.fact, pci_ids). nvidia-driver.yml
+# refuses a node with a GPU missing from this list, or with a GPU the branch
+# or the open kernel modules cannot drive. Add a new model here before its
+# first driver run. Surveyed 2026-09-29, see docs/kosmos/gpu-inventory.md.
+nvidia_gpu_architectures:
+  "10de:1e04": turing   # GeForce RTX 2080 Ti (alanturing, hamilton)
+  "10de:1e30": turing   # Quadro RTX 8000 (roentgen)
+  "10de:2230": ampere   # RTX A6000 (aristarchus, galileo, ptolemaeus)
+  "10de:20b5": ampere   # A100 80GB PCIe (euctemon, eudoxus)
+  "10de:2330": hopper   # H100 80GB HBM3 SXM5 (herakles, NVSwitch)
+# Supported up to the 580 branch only, and not by the open kernel modules.
+nvidia_gpu_legacy_architectures: [maxwell, pascal, volta]
 
 
 ################################################################################
@@ -287,6 +303,11 @@ maas_python_reqs:
 # NVIDIA Datacenter GPU Manager                                                #
 ################################################################################
 install_dcgm: true
+# kosmos: DCGM 4. The role default "datacenter-gpu-manager" is DCGM 3, which
+# NVIDIA's ubuntu2604 repo does not carry. The -cudaNN package must match the
+# driver's CUDA major version: 13 for the 580 branch and newer. Nodes that
+# still hold DCGM 3 (the 22.04 install) will refuse the switch.
+dcgm_pkg_name: "datacenter-gpu-manager-4-cuda{{ '13' if (nvidia_driver_branch | int) >= 580 else '12' }}"
 
 ################################################################################
 # Misc.                                                                        #
