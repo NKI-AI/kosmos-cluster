@@ -37,9 +37,6 @@ hamilton            ansible_host=hamilton
 # RTX8000 nodes
 roentgen            ansible_host=roentgen
 
-# P6000 node
-# mariecurie        ansible_host=mariecurie          Phased out
-
 # VMs/controller
 atlas               ansible_host=atlas
 
@@ -60,7 +57,6 @@ aristarchus
 alanturing
 herakles
 hamilton
-# mariecurie                                                Phased out
 # roentgen  
 # plato
 # schrodinger
@@ -94,7 +90,6 @@ eudoxus
 # schrodinger
 alanturing
 roentgen
-# mariecurie
 hamilton
 gaia
 herakles
@@ -123,9 +118,6 @@ hamilton
 # carlos                                                    Phased out
 # plato
 # schrodinger
-
-[partition_p6000]
-# mariecurie                                                Phased out
 
 [partition_rtx8000]
 roentgen

@@ -1,7 +1,16 @@
 #!/bin/bash
+# kosmos: besides the count, report the PCI vendor:device IDs of the GPUs and
+# the number of NVSwitch chips. Both come from the PCI bus, so they are there
+# before a driver is installed. IDs rather than lspci names, because an older
+# pci.ids does not know newer GPUs (Ubuntu 22.04 shows the H100 as "Device").
 if ! command -v lspci >/dev/null 2>&1; then
     echo lspci not installed
     exit 1
 fi
-count=$(lspci | grep -E "(3D|VGA compatible) controller: NVIDIA" --count)
-echo "{ \"count\": $count }"
+# Class 0300 = VGA compatible controller, 0302 = 3D controller (same set the
+# old name match counted); an NVSwitch is 0680 (other bridge).
+gpu_ids=$(lspci -n -d 10de: | awk '$2 == "0300:" || $2 == "0302:" {print $3}')
+count=$(printf '%s' "$gpu_ids" | grep -c .)
+pci_ids=$(printf '%s\n' "$gpu_ids" | grep . | sort -u | sed 's/.*/"&"/' | paste -sd, -)
+nvswitch_count=$(lspci -n -d 10de: | awk '$2 == "0680:"' | wc -l)
+echo "{ \"count\": $count, \"pci_ids\": [$pci_ids], \"nvswitch_count\": $nvswitch_count }"

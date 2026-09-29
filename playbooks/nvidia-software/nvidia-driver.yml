@@ -14,6 +14,31 @@
       include_role:
         name: facts
 
+    # kosmos: refuse GPUs the configured branch or kernel module flavour cannot
+    # drive (config/group_vars/all.yml, docs/kosmos/gpu-inventory.md).
+    - name: check that the driver branch supports this node's GPUs
+      assert:
+        that:
+          - _gpu_unknown_ids | length == 0
+          - not (_gpu_legacy | length > 0 and (_gpu_branch | int > 580 or _gpu_open_modules | bool))
+        fail_msg: >-
+          {{ inventory_hostname }}: GPU IDs {{ ansible_local['gpus']['pci_ids'] | default([]) }}.
+          {% if _gpu_unknown_ids %}Not in nvidia_gpu_architectures: {{ _gpu_unknown_ids }}; look the model up and add it.{% endif %}
+          {% if _gpu_legacy %}Architecture {{ _gpu_legacy | unique }} needs branch 580 or older without open kernel modules
+          (configured: {{ _gpu_branch }}, open modules {{ _gpu_open_modules }}).{% endif %}
+      vars:
+        _gpu_ids: "{{ ansible_local['gpus']['pci_ids'] | default([]) }}"
+        _gpu_unknown_ids: "{{ _gpu_ids | reject('in', nvidia_gpu_architectures) | list }}"
+        _gpu_legacy: >-
+          {{ _gpu_ids | select('in', nvidia_gpu_architectures) | map('extract', nvidia_gpu_architectures)
+             | select('in', nvidia_gpu_legacy_architectures | default([])) | list }}
+        _gpu_branch: "{{ nvidia_driver_ubuntu_branch | default(nvidia_driver_branch) }}"
+        _gpu_open_modules: "{{ nvidia_driver_ubuntu_use_open_kernel_modules | default(false) }}"
+      when:
+        - nvidia_gpu_architectures is defined
+        - ansible_local['gpus']['count']
+        - is_dgx.stat.exists == False
+
     - name: configure Ubuntu NVIDIA driver packages
       include_tasks: tasks/nvidia-driver-ubuntu-packages.yml
       when: ansible_distribution == 'Ubuntu'
@@ -22,6 +47,17 @@
       include_role:
         name: nvidia.nvidia_driver
       when: (ansible_local['gpus']['count'] and is_dgx.stat.exists == False) or (nvidia_driver_force_install|default(false))
+
+    - name: install NVSwitch fabric manager
+      include_tasks: tasks/nvidia-fabricmanager.yml
+      vars:
+        _nvidia_fm_branch: "{{ nvidia_driver_ubuntu_branch | default(nvidia_driver_branch) }}"
+        _nvidia_fm_suffix: "{{ nvidia_driver_ubuntu_packages_suffix | default('-server') }}"
+      when:
+        - ansible_distribution == 'Ubuntu'
+        - ansible_local['gpus']['nvswitch_count'] | default(0) | int > 0
+        - is_dgx.stat.exists == False
+        - nvidia_driver_package_state | default('present') != 'absent'
 
     - name: test nvidia-smi
       command: nvidia-smi

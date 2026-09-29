@@ -1,0 +1,37 @@
+---
+# kosmos: NVSwitch systems (HGX; herakles) need nvidia-fabricmanager at
+# exactly the driver's version, or CUDA reports "system not yet initialized".
+# The nvidia.nvidia_driver role does not install it (only roles/nvidia-dgx
+# does, for DGX OS), so it is pinned here to the installed driver's upstream
+# version. Ubuntu publishes both at the same version string.
+- name: Read the installed NVIDIA driver package version
+  command: "dpkg-query -W -f=${Version} nvidia-utils-{{ _nvidia_fm_branch }}{{ _nvidia_fm_suffix }}"
+  register: _nvidia_fm_driver_pkg
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install nvidia-fabricmanager matching the driver
+  apt:
+    name: "nvidia-fabricmanager-{{ _nvidia_fm_branch }}{{ ('=' ~ _nvidia_fm_driver_pkg.stdout.split('-')[0] ~ '*') if _nvidia_fm_driver_pkg.stdout else '' }}"
+    state: present
+  environment: "{{ proxy_env if proxy_env is defined else {} }}"
+
+- name: Enable and start nvidia-fabricmanager
+  systemd:
+    name: nvidia-fabricmanager
+    enabled: true
+    state: started
+  # In check mode on a fresh node the package (and its unit) is not there yet.
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Wait for the NVSwitch fabric on every GPU
+  command: nvidia-smi -q
+  register: _nvidia_fm_smi
+  changed_when: false
+  retries: 12
+  delay: 10
+  until: >-
+    (_nvidia_fm_smi.stdout | regex_findall('Fabric\s+State\s+:\s+Completed\s+Status\s+:\s+Success') | length)
+    == (ansible_local['gpus']['count'] | int)
+  when: not ansible_check_mode
