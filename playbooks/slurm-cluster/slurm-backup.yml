@@ -1,0 +1,411 @@
+---
+# Back up everything needed to roll a Slurm upgrade back on the KOSMOS
+# cluster: the accounting database, the controller state directory, the
+# configuration, and the installed Slurm files (for a binary rollback
+# without rebuilding). Written for docs/kosmos/slurm-upgrade.md; also usable
+# on its own before any risky change on the controller.
+#
+#   ansible-playbook -kK playbooks/slurm-cluster/slurm-backup.yml
+#   ansible-playbook -kK playbooks/slurm-cluster/slurm-backup.yml \
+#       -e slurm_backup_stop_slurmdbd=true -e slurm_backup_nodes=true
+#
+# -k: atlas takes a password, not the Kerberos ticket. -K: sudo password.
+#
+# The database dump is only consistent when slurmdbd is stopped
+# (slurm_backup_stop_slurmdbd). While it is stopped, slurmctld queues its
+# accounting messages and sacct/sreport do not answer; nothing is lost.
+# With the default (false) the dump is taken with --single-transaction while
+# slurmdbd runs, which is fine for a routine copy but not for an upgrade.
+#
+# Everything lands in {{ slurm_backup_dir }}/<timestamp>-slurm-<version><label>
+# on the controller. The dump, the sacctmgr dump and the manifest are also
+# fetched to {{ slurm_backup_fetch_dir }} on the Ansible node, so losing the
+# controller disk does not lose the dump.
+#
+# Refuses --check: dumps cannot be simulated.
+
+- name: Back up Slurm accounting database, state and installed files on the controller
+  hosts: slurm-master
+  become: yes
+  any_errors_fatal: true
+  tags: [backup]
+  vars:
+    slurm_backup_client_commands:
+      - sacct
+      - sacctmgr
+      - salloc
+      - sattach
+      - sbatch
+      - sbcast
+      - scancel
+      - scontrol
+      - scrontab
+      - sdiag
+      - sgather
+      - sh5util
+      - sinfo
+      - sprio
+      - squeue
+      - sreport
+      - srun
+      - sshare
+      - sstat
+      - strigger
+      - sview
+  tasks:
+    - name: refuse check mode (a backup cannot be simulated)
+      assert:
+        that: not ansible_check_mode
+        fail_msg: "slurm-backup.yml does nothing useful in --check mode; run it for real."
+
+    # Defaults. Site values in config/group_vars or -e win because each line
+    # only fills in what is not already defined.
+    - name: apply backup defaults
+      set_fact:
+        slurm_backup_dir: "{{ slurm_backup_dir | default('/var/backups/slurm') }}"
+        slurm_backup_label: "{{ slurm_backup_label | default('') }}"
+        slurm_backup_stop_slurmdbd: "{{ slurm_backup_stop_slurmdbd | default(false) }}"
+        slurm_backup_start_slurmdbd_after: "{{ slurm_backup_start_slurmdbd_after | default(true) }}"
+        slurm_backup_src_tarball: "{{ slurm_backup_src_tarball | default(true) }}"
+        slurm_backup_min_free_bytes: "{{ slurm_backup_min_free_bytes | default(2147483648) }}"
+        slurm_backup_fetch: "{{ slurm_backup_fetch | default(true) }}"
+        slurm_backup_fetch_dir: "{{ slurm_backup_fetch_dir | default(lookup('env', 'HOME') ~ '/slurm-backups') }}"
+        slurm_backup_state_save_location: "{{ slurm_backup_state_save_location | default('/var/spool/slurm/ctld') }}"
+        slurm_backup_mysql_datadir: "{{ slurm_backup_mysql_datadir | default('/var/lib/mysql') }}"
+        slurm_backup_db_name: "{{ slurm_backup_db_name | default('slurm_acct_db') }}"
+
+    # Exports the slurm role defaults (slurm_install_prefix, slurm_build_dir,
+    # slurm_configure, ...) at default precedence, so site group_vars still win.
+    - name: load slurm role defaults and OS variables
+      include_role:
+        name: slurm
+        tasks_from: setup-role
+        public: yes
+
+    - name: read the installed Slurm version
+      command: "{{ slurm_install_prefix }}/sbin/slurmd --version"
+      register: slurm_backup_slurmd_version
+      changed_when: false
+
+    - name: set installed version and backup path
+      set_fact:
+        slurm_installed_version: "{{ slurm_backup_slurmd_version.stdout | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+
+    - name: choose the backup directory (unless an importing playbook already did)
+      set_fact:
+        slurm_backup_path: "{{ slurm_backup_dir }}/{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}-slurm-{{ slurm_installed_version }}{{ slurm_backup_label }}"
+      when: slurm_backup_path is not defined
+
+    - name: measure the database and state directory
+      shell: |
+        set -e
+        du -sb {{ slurm_backup_mysql_datadir }} {{ slurm_backup_state_save_location }} | awk '{s+=$1} END {print s}'
+      register: slurm_backup_needed
+      changed_when: false
+
+    - name: create the backup directory
+      file:
+        path: "{{ slurm_backup_path }}"
+        state: directory
+        mode: "0700"
+        owner: root
+        group: root
+
+    - name: measure free space on the backup filesystem
+      command: df --output=avail -B1 {{ slurm_backup_path }}
+      register: slurm_backup_avail
+      changed_when: false
+
+    - name: refuse to start without room for the backup
+      assert:
+        that: (slurm_backup_avail.stdout_lines[-1] | int) > (slurm_backup_needed.stdout | int) + (slurm_backup_min_free_bytes | int)
+        fail_msg: >-
+          {{ slurm_backup_path }} has {{ slurm_backup_avail.stdout_lines[-1] | int | human_readable }} free,
+          the database and state directory take {{ slurm_backup_needed.stdout | int | human_readable }}
+          (uncompressed) and slurm_backup_min_free_bytes is {{ slurm_backup_min_free_bytes | int | human_readable }}.
+          Free space, or set slurm_backup_dir to another filesystem.
+
+    - name: record cluster state while slurmdbd is still running
+      shell: |
+        set -o pipefail
+        {
+          echo "### backup started $(date --iso-8601=seconds) on $(hostname)"
+          echo "### slurmd --version"; {{ slurm_install_prefix }}/sbin/slurmd --version
+          echo "### systemctl is-active slurmctld slurmdbd mariadb munge"; systemctl is-active slurmctld slurmdbd mariadb munge || true
+          echo "### sacctmgr show cluster"; {{ slurm_install_prefix }}/bin/sacctmgr -n show cluster format=Cluster,ControlHost,RPC || true
+          echo "### sacctmgr show runawayjobs (informational; fix by hand, never with -i)"
+          {{ slurm_install_prefix }}/bin/sacctmgr -P show runawayjobs </dev/null || true
+          echo "### sinfo -R"; {{ slurm_install_prefix }}/bin/sinfo -R || true
+          echo "### squeue counts"; {{ slurm_install_prefix }}/bin/squeue -h -o %T | sort | uniq -c || true
+          echo "### database size (MB per table)"
+          mysql -N -e 'SELECT table_name, ROUND((data_length+index_length)/1048576) FROM information_schema.tables WHERE table_schema="{{ slurm_backup_db_name }}" ORDER BY 2 DESC' || true
+          echo "### mariadb-server"; dpkg -l mariadb-server 2>/dev/null | tail -1 || true
+          echo "### innodb settings"
+          mysql -N -e 'SELECT @@innodb_buffer_pool_size, @@innodb_lock_wait_timeout, @@innodb_log_file_size, @@max_allowed_packet' || true
+        } > {{ slurm_backup_path }}/versions.txt 2>&1
+        {{ slurm_install_prefix }}/bin/scontrol show config > {{ slurm_backup_path }}/scontrol-show-config.txt || true
+        {{ slurm_install_prefix }}/bin/scontrol show nodes > {{ slurm_backup_path }}/scontrol-show-nodes.txt || true
+        {{ slurm_install_prefix }}/bin/squeue -o %all > {{ slurm_backup_path }}/squeue.txt || true
+        {{ slurm_install_prefix }}/bin/sinfo -N -l > {{ slurm_backup_path }}/sinfo.txt || true
+        {{ slurm_install_prefix }}/bin/sacctmgr -P show qos > {{ slurm_backup_path }}/sacctmgr-qos.txt || true
+        {{ slurm_install_prefix }}/bin/sacctmgr -P show assoc > {{ slurm_backup_path }}/sacctmgr-assoc.txt || true
+        {{ slurm_install_prefix }}/bin/sacctmgr -i dump {{ slurm_cluster_name }} file={{ slurm_backup_path }}/sacctmgr-dump.cfg || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: stop slurmdbd for a consistent dump
+      systemd:
+        name: slurmdbd
+        state: stopped
+      when: slurm_backup_stop_slurmdbd | bool
+
+    - name: wait until slurmdbd has released its port
+      wait_for:
+        port: 6819
+        state: stopped
+        timeout: 300
+      when: slurm_backup_stop_slurmdbd | bool
+
+    - name: dump the accounting database (root over the unix socket)
+      block:
+        - name: mysqldump as root
+          shell: |
+            set -o pipefail
+            mysqldump --single-transaction --quick --hex-blob --routines --triggers --events \
+              --databases {{ slurm_backup_db_name }} | gzip -1 > {{ slurm_backup_path }}/{{ slurm_backup_db_name }}.sql.gz
+          args:
+            executable: /bin/bash
+          async: 7200
+          poll: 15
+      rescue:
+        - name: read the slurmdbd database credentials
+          shell: |
+            set -o pipefail
+            awk -F= '/^StorageUser=/ {u=$2} /^StoragePass=/ {p=$2} END {printf "[client]\nuser=%s\npassword=%s\n", u, p}' {{ slurm_config_dir }}/slurmdbd.conf > {{ slurm_backup_path }}/.my.cnf
+            chmod 0600 {{ slurm_backup_path }}/.my.cnf
+          args:
+            executable: /bin/bash
+          no_log: true
+
+        - name: mysqldump with the slurmdbd credentials
+          shell: |
+            set -o pipefail
+            mysqldump --defaults-extra-file={{ slurm_backup_path }}/.my.cnf --single-transaction --quick --hex-blob --routines --triggers --events \
+              --databases {{ slurm_backup_db_name }} | gzip -1 > {{ slurm_backup_path }}/{{ slurm_backup_db_name }}.sql.gz
+          args:
+            executable: /bin/bash
+          async: 7200
+          poll: 15
+          no_log: true
+
+        - name: remove the credentials file
+          file:
+            path: "{{ slurm_backup_path }}/.my.cnf"
+            state: absent
+
+    - name: verify the dump is complete
+      shell: |
+        set -o pipefail
+        zcat {{ slurm_backup_path }}/{{ slurm_backup_db_name }}.sql.gz | tail -c 300 | grep -q 'Dump completed'
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: check whether slurmctld is running
+      command: systemctl is-active slurmctld
+      register: slurm_backup_ctld_active
+      changed_when: false
+      failed_when: false
+
+    - name: archive the controller state directory
+      command: >
+        tar --warning=no-file-changed -czf
+        {{ slurm_backup_path }}/statesave-{{ 'ctld-running' if slurm_backup_ctld_active.rc == 0 else 'ctld-stopped' }}.tgz
+        -C {{ slurm_backup_state_save_location | dirname }} {{ slurm_backup_state_save_location | basename }}
+      register: slurm_backup_state_tar
+      failed_when: slurm_backup_state_tar.rc not in [0, 1]
+
+    - name: archive the configuration
+      command: >
+        tar --ignore-failed-read -czf {{ slurm_backup_path }}/etc.tgz
+        {{ slurm_config_dir }} {{ slurmctl_config_dir }} /etc/munge/munge.key
+        /etc/systemd/system/slurmctld.service /etc/systemd/system/slurmdbd.service /etc/systemd/system/slurmd.service
+        /etc/mysql /etc/ld.so.conf.d/slurm.conf /etc/pam.d/sshd /etc/pam.d/common-session
+      register: slurm_backup_etc_tar
+      failed_when: slurm_backup_etc_tar.rc not in [0, 1]
+
+    - name: keep a plain copy of the shared slurm.conf
+      copy:
+        src: "{{ slurmctl_config_dir }}/slurm.conf"
+        dest: "{{ slurm_backup_path }}/slurm.conf.orig"
+        remote_src: yes
+        mode: "0644"
+
+    - name: archive the installed Slurm files for a binary rollback
+      shell: |
+        set -o pipefail
+        cd /
+        ls -d {{ slurm_install_prefix | regex_replace('^/', '') }}/lib/slurm \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/lib/libslurm* \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/include/slurm \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/sbin/slurm* \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/sbin/sackd \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/share/slurm \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/lib/perl5 \
+              {{ slurm_pam_lib_dir | regex_replace('^/', '') }}/pam_slurm*.so \
+              {% for c in slurm_backup_client_commands %}{{ slurm_install_prefix | regex_replace('^/', '') }}/bin/{{ c }} {% endfor %} \
+              2>/dev/null | sort -u > {{ slurm_backup_path }}/installed-files.list
+        tar -czf {{ slurm_backup_path }}/usr-local-slurm-{{ slurm_installed_version }}.tgz -T {{ slurm_backup_path }}/installed-files.list
+      args:
+        executable: /bin/bash
+
+    - name: keep the source tarball and configure line of the installed version
+      block:
+        - name: download the installed version's source tarball
+          get_url:
+            url: "{{ slurm_src_url | regex_replace(slurm_version | regex_escape, slurm_installed_version) }}"
+            dest: "{{ slurm_backup_path }}/"
+            mode: "0644"
+          environment: "{{ proxy_env if proxy_env is defined else {} }}"
+          register: slurm_backup_src
+          failed_when: false
+
+        - name: record how the installed version was configured
+          shell: |
+            {
+              echo "### slurm_configure (site value at backup time)"; echo '{{ slurm_configure }}'
+              echo "### head of {{ slurm_build_dir }}/config.log"; head -8 {{ slurm_build_dir }}/config.log 2>/dev/null || echo "(no build dir)"
+            } > {{ slurm_backup_path }}/configure.txt
+          changed_when: false
+      when: slurm_backup_src_tarball | bool
+
+    - name: write manifest and checksums
+      shell: |
+        cd {{ slurm_backup_path }}
+        ls -l > MANIFEST.txt
+        sha256sum $(ls | grep -v -e '^MANIFEST.txt$' -e '^SHA256SUMS$') > SHA256SUMS
+      changed_when: false
+
+    - name: start slurmdbd again
+      systemd:
+        name: slurmdbd
+        state: started
+      when: slurm_backup_stop_slurmdbd | bool and slurm_backup_start_slurmdbd_after | bool
+
+    - name: wait for slurmdbd
+      wait_for:
+        port: 6819
+        timeout: 600
+      when: slurm_backup_stop_slurmdbd | bool and slurm_backup_start_slurmdbd_after | bool
+
+    - name: fetch the dump and manifest to the Ansible node
+      fetch:
+        src: "{{ slurm_backup_path }}/{{ item }}"
+        dest: "{{ slurm_backup_fetch_dir }}/{{ inventory_hostname }}/{{ slurm_backup_path | basename }}/"
+        flat: yes
+      loop:
+        - "{{ slurm_backup_db_name }}.sql.gz"
+        - sacctmgr-dump.cfg
+        - slurm.conf.orig
+        - versions.txt
+        - MANIFEST.txt
+        - SHA256SUMS
+      when: slurm_backup_fetch | bool
+
+    - name: backup summary
+      debug:
+        msg:
+          - "Backup of Slurm {{ slurm_installed_version }} written to {{ inventory_hostname }}:{{ slurm_backup_path }}"
+          - "slurmdbd was {{ 'stopped for the dump' if slurm_backup_stop_slurmdbd | bool else 'running during the dump (--single-transaction)' }}{{ ' and left stopped' if slurm_backup_stop_slurmdbd | bool and not slurm_backup_start_slurmdbd_after | bool else '' }}"
+          - "{{ 'Dump and manifest fetched to ' ~ slurm_backup_fetch_dir ~ '/' ~ inventory_hostname ~ '/' ~ (slurm_backup_path | basename) if slurm_backup_fetch | bool else 'Nothing fetched to the Ansible node (slurm_backup_fetch=false)' }}"
+          - "Keep this directory until the change it protects has soaked. Rollback: docs/kosmos/slurm-upgrade.md."
+
+- name: Back up the installed Slurm files on compute and login nodes
+  hosts: slurm-node:slurm-login
+  become: yes
+  gather_facts: no
+  ignore_unreachable: true
+  tags: [backup, nodes]
+  vars:
+    slurm_backup_client_commands:
+      - sacct
+      - sacctmgr
+      - salloc
+      - sattach
+      - sbatch
+      - sbcast
+      - scancel
+      - scontrol
+      - scrontab
+      - sdiag
+      - sgather
+      - sh5util
+      - sinfo
+      - sprio
+      - squeue
+      - sreport
+      - srun
+      - sshare
+      - sstat
+      - strigger
+      - sview
+  tasks:
+    - name: skip node backups unless asked for
+      meta: end_host
+      when: not (slurm_backup_nodes | default(false) | bool)
+
+    - name: apply backup defaults
+      set_fact:
+        slurm_backup_dir: "{{ slurm_backup_dir | default('/var/backups/slurm') }}"
+
+    - name: gather minimal facts
+      setup:
+        gather_subset: ['!all', '!min', 'distribution']
+
+    - name: load slurm role defaults and OS variables
+      include_role:
+        name: slurm
+        tasks_from: setup-role
+        public: yes
+
+    - name: read the installed Slurm version
+      command: "{{ slurm_install_prefix }}/sbin/slurmd --version"
+      register: slurm_backup_slurmd_version
+      changed_when: false
+      failed_when: false
+
+    - name: set installed version and backup path (same basename as on the controller)
+      set_fact:
+        slurm_installed_version: "{{ slurm_backup_slurmd_version.stdout | default('') | regex_search('[0-9]+\\.[0-9]+\\.[0-9]+') or 'unknown' }}"
+        slurm_backup_path: "{{ slurm_backup_dir }}/{{ hostvars[groups['slurm-master'][0]].slurm_backup_path | basename }}"
+
+    - name: create the backup directory
+      file:
+        path: "{{ slurm_backup_path }}"
+        state: directory
+        mode: "0700"
+
+    - name: archive the installed Slurm files and local configuration
+      shell: |
+        set -o pipefail
+        cd /
+        ls -d {{ slurm_install_prefix | regex_replace('^/', '') }}/lib/slurm \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/lib/libslurm* \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/include/slurm \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/sbin/slurm* \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/share/slurm \
+              {{ slurm_install_prefix | regex_replace('^/', '') }}/lib/perl5 \
+              {{ slurm_pam_lib_dir | regex_replace('^/', '') }}/pam_slurm*.so \
+              {{ slurm_config_dir | regex_replace('^/', '') }} \
+              etc/systemd/system/slurmd.service etc/ld.so.conf.d/slurm.conf etc/pam.d/sshd etc/pam.d/common-session \
+              {% for c in slurm_backup_client_commands %}{{ slurm_install_prefix | regex_replace('^/', '') }}/bin/{{ c }} {% endfor %} \
+              2>/dev/null | sort -u > {{ slurm_backup_path }}/installed-files.list
+        tar --ignore-failed-read -czf {{ slurm_backup_path }}/usr-local-slurm-{{ slurm_installed_version }}.tgz -T {{ slurm_backup_path }}/installed-files.list
+        cd {{ slurm_backup_path }} && sha256sum * > SHA256SUMS
+      args:
+        executable: /bin/bash
+
+    - name: node backup summary
+      debug:
+        msg: "Installed Slurm {{ slurm_installed_version }} files archived to {{ inventory_hostname }}:{{ slurm_backup_path }}"
