@@ -94,24 +94,32 @@ partition_settings:
 # kosmos: QOS created by roles/slurm/tasks/controller.yml ("create QOS", then
 # "set QOS limits": sacctmgr modify qos where name=<key> set <k>=<v> ...).
 # Every name in a partition's slurm_allow_qos must be here. Keys and values
-# are sacctmgr's (e.g. MaxTRESPerUser: gres/gpu=2, MaxWall: 7-00:00:00,
-# Flags: DenyOnLimit); an empty dict only creates the QOS.
-# TODO before the reinstall: copy the limits from the live cluster
-# (sacctmgr -P show qos on atlas).
+# are sacctmgr's; an empty dict only creates the QOS. Copied from the live
+# cluster (sacctmgr -P show qos on atlas, 2026-09-30): everything else is at
+# Slurm's defaults there. "normal" is created by Slurm itself.
+# MaxTRESPerUser = per-user limit over all running jobs; MaxTRES = per job;
+# GrpTRES = all jobs in the QOS together.
 slurm_qos:
-  a100_qos: {}
-  four_a100_qos: {}
-  eight_a100_qos: {}
-  h100_qos: {}
-  four_h100_qos: {}
-  eight_h100_qos: {}
-  a6000_qos: {}
-  four_a6000_qos: {}
-  eight_a6000_qos: {}
-  rtx_qos: {}
+  a100_qos: {MaxTRESPerUser: gres/gpu=2}
+  four_a100_qos: {MaxTRESPerUser: gres/gpu=4}
+  eight_a100_qos: {MaxTRESPerUser: gres/gpu=8}
+  h100_qos: {MaxTRESPerUser: gres/gpu=1}
+  four_h100_qos: {MaxTRESPerUser: gres/gpu=4}
+  eight_h100_qos: {MaxTRESPerUser: gres/gpu=8}
+  a6000_qos: {MaxTRESPerUser: gres/gpu=2}
+  four_a6000_qos: {MaxTRESPerUser: gres/gpu=4}
+  eight_a6000_qos: {MaxTRESPerUser: gres/gpu=8}
+  rtx_qos: {MaxTRESPerUser: gres/gpu=4}
+  # no limits on the live cluster either
   eight_rtx_qos: {}
-  cpu_qos: {}
-  cpu_128_qos: {}
+  cpu_qos: {GrpTRES: cpu=256, MaxTRESPerUser: cpu=32}
+  cpu_128_qos: {GrpTRES: cpu=256, MaxTRESPerUser: cpu=128}
+  # Not allowed by any partition, but they exist on the live cluster and
+  # associations in the sacctmgr dump may reference them (sacctmgr load
+  # fails on an unknown QOS).
+  tengpu: {MaxTRESPerUser: gres/gpu=10}
+  burst: {MaxTRES: gres/gpu=32}
+  high_gpu_limit: {MaxTRESPerUser: gres/gpu=32}
 
 ################################################################################
 # Ansible facts                                                                #

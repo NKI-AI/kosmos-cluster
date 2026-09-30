@@ -26,10 +26,10 @@ Rules for every step:
 
 ## 0. Before the maintenance (repo)
 
-1. **QOS limits.** On atlas: `sacctmgr -P show qos`. Copy each QOS's limits
-   into `slurm_qos` in `config/group_vars/slurm-cluster.yml` (names are
-   already there; keys and values as sacctmgr takes them, e.g.
-   `MaxTRESPerUser: gres/gpu=2`), remove the TODO.
+1. **QOS limits.** Copied into `slurm_qos` in
+   `config/group_vars/slurm-cluster.yml` from `sacctmgr -P show qos` on
+   2026-09-30. If anyone changes a QOS on the live cluster before the wipe,
+   update it there too; `sacctmgr-qos.txt` from step 1.2 is the final check.
 2. **Secrets.** `slurm_password` and `slurm_db_password` come from the shared
    vault on teuwen-ansible (set up by another admin), with new values. The
    munge key is derived from `slurm_password`, so every host gets the new key
