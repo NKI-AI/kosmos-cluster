@@ -156,6 +156,7 @@
   environment: "{{ proxy_env if proxy_env is defined else {} }}"
   when: slurm_build
 
+# Not in check mode: get_url does not write the file there.
 - name: unpack source
   unarchive:
     src: "{{ slurm_src_cache_dir }}/slurm-{{ slurm_version }}.tar.bz2"
@@ -163,7 +164,7 @@
     dest: "{{ slurm_build_dir }}"
     extra_opts:
       - --strip-components=1
-  when: slurm_build
+  when: slurm_build and not ansible_check_mode
 
 - name: clean src dir
   command: make distclean
@@ -238,17 +239,21 @@
     state: directory
     mode: 0775
 
+# kosmos: only after a build. Unconditionally, the recursive chmod flipped
+# the exporter's build context (under deepops_dir, mode 0644) on every run,
+# which rebuilt and restarted the exporter each time.
 - name: fix deepops dir permissions
   file:
     path: "{{ deepops_dir }}"
     state: directory
     mode: 0755
     recurse: yes
+  when: slurm_build
 
 - name: start docker slurm exporter service again
   service:
     name: "docker.slurm-exporter.service"
     state: restarted
-  when: (ansible_distribution == 'Ubuntu') and 
+  when: slurm_build and (ansible_distribution == 'Ubuntu') and
       ("docker.slurm-exporter.service" in ansible_facts.services)
 
