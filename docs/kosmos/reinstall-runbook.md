@@ -8,13 +8,14 @@ Slurm 26.05.4 fresh with a new accounting database (job IDs restart at 1).
 carlos, plato, mariecurie and schrodinger are gone. gorgophone and the file
 servers are not part of this maintenance.
 
-The order below matters; how long each step takes does not. Nothing in the
-repo depends on which nodes come first: every playbook takes `-l`.
+The order below matters; how long each step takes does not. Apart from
+atlas being in the first batch, nothing depends on which nodes come first:
+every playbook takes `-l`.
 
 Rules for every step:
 
-- Playbooks run on teuwen-ansible, in your own clone, in a login shell (for `KOSMOS_SLURM_SECRETS_FILE`,
-  `docs/kosmos/slurm-secrets.md`), with
+- Playbooks run on teuwen-ansible, in your own clone, in a login shell (for
+  `KOSMOS_SLURM_SECRETS_FILE`, `docs/kosmos/slurm-secrets.md`), with
   `source /opt/kosmos-cluster/env-26.07/bin/activate`, from an up-to-date
   `deepops-26.07` (`git pull`). Every host must be deployed from this one
   env, or the munge keys differ.
@@ -29,8 +30,9 @@ Rules for every step:
   its jobs. A node that answers but whose sudo fails also stops the run:
   fix it or power it off.
 - **The first playbook on a reinstalled host runs with `--flush-cache`**
-  (step 2.2): the fact cache may still hold its 22.04 facts, and with them
-  the HWE kernel is skipped and the wrong repositories are chosen.
+  (step 2.2): the fact cache (per admin, 24 h) may still hold its 22.04
+  facts. `kernel.yml` also refreshes the OS facts itself, at the start of
+  every `slurm-cluster.yml` run; the flag is the second safeguard.
 - A step that fails: fix it on a branch, merge into `deepops-26.07`, pull,
   rerun the same command.
 - A converged rerun reports `changed` only for the Slurm daemon restarts
@@ -127,8 +129,8 @@ That is harmless; power it off or ignore it.
    ```
 
    (The second command says "no hosts matched" for a batch without compute
-   nodes.) Secure Boot must be off on the compute nodes: the 580 driver is built by
-   DKMS and an unsigned module does not load. If it is on, ask IT.
+   nodes.) Secure Boot must be off on the compute nodes: the 580 driver is
+   built by DKMS and an unsigned module does not load. If it is on, ask IT.
 2. Kernel, alone first to isolate kernel problems (also part of step 3):
 
    ```bash
@@ -262,6 +264,9 @@ Changes that can break existing scripts (Slurm release notes 23.11-26.05):
 - NVIDIA driver 580 on every GPU node (CUDA 13 capable; older CUDA
   containers keep working).
 - Apptainer 1.5.4 on every compute node (not on kosmos).
+- `nodestat` stays, with fixes: array jobs show their GPUs and memory,
+  `nodestat -g` shows GPUs in use, drained/down nodes are labelled as such,
+  memory is in GiB like Slurm (numbers look about 2 % smaller).
 - New and harmless: several QOS per job, `srun --async`.
 - The ssh host keys are new: ssh warns that the host identification of
   kosmos changed; `ssh-keygen -R kosmos` removes the old key.
