@@ -23,6 +23,11 @@ Rules for every step:
 - **Every Slurm run includes atlas** (`-l atlas,<nodes>`). Compute nodes read
   `slurm.conf` from `/sw/.slurm`, which only the controller play writes, and
   a node joins `slurm.conf` in the run that first reaches it (deviation 26).
+  During the batches that needs `-e slurm_nodes_allow_unreachable=true`;
+  without it a run stops when any Slurm node is unreachable, so that after
+  go-live a node that is briefly down is not dropped from `slurm.conf` with
+  its jobs. A node that answers but whose sudo fails also stops the run:
+  fix it or power it off.
 - **The first playbook on a reinstalled host runs with `--flush-cache`**
   (step 2.2): the fact cache may still hold its 22.04 facts, and with them
   the HWE kernel is skipped and the wrong repositories are chosen.
@@ -134,11 +139,12 @@ That is harmless; power it off or ignore it.
 3. Everything else:
 
    ```bash
-   ansible-playbook -kK playbooks/slurm-cluster.yml -l atlas,N
+   ansible-playbook -kK playbooks/slurm-cluster.yml -l atlas,N -e slurm_nodes_allow_unreachable=true
    ```
 
    Driver 580 (and fabric manager on herakles), DCGM 4, Slurm 26.05.4 build,
-   munge, MariaDB/slurmdbd/slurmctld and the QOS on atlas, slurmd on the
+   munge, MariaDB/slurmdbd/slurmctld and the QOS on atlas (their limits
+   after slurmctld has started), slurmd on the
    nodes, NHC, Apptainer on the compute nodes, monitoring, motd, nvtop,
    nodestat.
    Nodes that cannot be reached are listed as "left out of slurm.conf";
@@ -195,8 +201,9 @@ That is harmless; power it off or ignore it.
 
 ## 3. Go-live (all twelve hosts deployed)
 
-1. `ansible-playbook -kK playbooks/slurm-cluster.yml`, then again:
-   converged on every host, no unreachable node.
+1. `ansible-playbook -kK playbooks/slurm-cluster.yml` (without
+   `slurm_nodes_allow_unreachable` from now on), then again: converged on
+   every host, no unreachable node.
 2. `python3 validate_slurm.py --json` (without `--allow-unavailable-nodes`)
    clean, every node idle, `sinfo -R` empty.
 3. `scontrol update nodename=ALL state=resume` if anything is still drained
@@ -228,7 +235,7 @@ series installed. Drain first when changing `kernel_cmdline_*`.
 
 ## What changed on purpose
 
-Deviations 23-34 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
+Deviations 23-35 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
 commits cherry-picked onto `reinstall-prep` (exporter restart and local
 build, retired Singularity wrapper, epilog/prolog fixes, NHC sshd match,
 pam_slurm_adopt guard, slurmd PATH).

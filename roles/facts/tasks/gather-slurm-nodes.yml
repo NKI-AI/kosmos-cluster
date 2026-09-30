@@ -2,9 +2,10 @@
 # ansible_local for every slurm-node (slurm.conf NodeName list). Explicit
 # setup ignores ansible_gather_subset; local skips gaia's mount collector.
 # Always refresh so the 24 h cache does not freeze RealMemory.
-# kosmos: a node that is unreachable (e.g. being reinstalled) does not abort
-# the play; it is listed in slurm_nodes_unreachable and slurm.conf leaves it
-# out until a later run reaches it (see the NodeName loop in slurm.conf).
+# kosmos: with -e slurm_nodes_allow_unreachable=true, a node that is
+# unreachable (e.g. being reinstalled) does not abort the play; it is listed
+# in slurm_nodes_unreachable and slurm.conf leaves it out until a later run
+# reaches it (see the NodeName loop in slurm.conf). Without it the play stops.
 - name: Gather ansible_local from all slurm-node hosts
   setup:
     gather_subset:
@@ -54,3 +55,17 @@
     msg: "{{ slurm_nodes_unreachable }}"
   run_once: true
   when: slurm_nodes_unreachable | length > 0
+
+# Leaving a node out of slurm.conf on a running cluster kills its jobs and
+# fails the pending jobs of a partition that disappears with it (slurmctld
+# restarts after the write). Only while nodes come back one by one
+# (reinstall) is that wanted: -e slurm_nodes_allow_unreachable=true.
+- name: Stop when a slurm-node host is unreachable
+  assert:
+    that: slurm_nodes_unreachable | length == 0 or slurm_nodes_allow_unreachable | default(false) | bool
+    fail_msg: >-
+      Unreachable: {{ slurm_nodes_unreachable | join(', ') }}. slurm.conf would drop them and
+      slurmctld would fail their jobs. Bring them back, or pass
+      -e slurm_nodes_allow_unreachable=true when that is intended (reinstall batches).
+    quiet: true
+  run_once: true
