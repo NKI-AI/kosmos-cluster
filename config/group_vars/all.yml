@@ -57,7 +57,8 @@ software_extra_packages:
   - vim
   - wget
   - build-essential
-  - linux-tools-generic
+  # kosmos: follows the HWE kernel (kernel.yml), not the GA 6.8 one
+  - linux-tools-generic-hwe-24.04
   - zsh
   - ncdu
   - nfs-common
@@ -65,6 +66,22 @@ software_extra_packages:
 #  - "{{ 'linux-headers-' + ansible_kernel }}"
 #software_remove_packages:
 #  - popularity-contest
+
+# kosmos: kernel and kernel command line
+# Playbook: generic/kernel.yml (also imported by slurm-cluster.yml)
+# Ubuntu HWE kernel for this release: on 24.04 (from 24.04.5) that is 7.0.
+# Installed with its headers (the NVIDIA driver is built by DKMS); the GA
+# kernel stays installed as the grub fallback.
+kernel_hwe: true
+kernel_hwe_release: "24.04"
+# Kernel command line (GRUB_CMDLINE_LINUX). pci=realloc=off on nodes whose
+# gpus fact is non-zero: keeps the firmware's PCI BAR layout, so the kernel's
+# automatic resource reallocation cannot leave a GPU without its large BAR.
+# The GPU nodes ran with it on 22.04 (hand-edited grub). Per-host additions
+# go in kernel_cmdline_extra (host_vars).
+kernel_cmdline_gpu: "pci=realloc=off"
+kernel_cmdline_extra: ""
+kernel_reboot_timeout: 1800
 
 
 ################################################################################

@@ -1,6 +1,8 @@
 ---
 - name: Check for DGX
-  when: ansible_product_name is search("DGX")
+  # kosmos: default(''): ansible_product_name is a hardware fact and
+  # site config gathers only the min subset.
+  when: ansible_product_name | default('') is search("DGX")
   set_fact:
     dcgm_is_dgx: true
 

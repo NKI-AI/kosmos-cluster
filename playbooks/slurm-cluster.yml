@@ -27,6 +27,12 @@
   import_playbook: generic/chrony-client.yml
   when: chrony_install|default(true)
 
+# kosmos: HWE kernel, headers and kernel command line before the NVIDIA
+# driver (DKMS) and before the Slurm role's grub task.
+- name: Kernel and kernel command line
+  import_playbook: generic/kernel.yml
+  when: kernel_manage|default(true)
+
 - name: Set up a local cluster container registry
   import_playbook: container/standalone-container-registry.yml
   vars:

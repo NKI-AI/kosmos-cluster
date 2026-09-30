@@ -1,0 +1,85 @@
+---
+# kosmos: Ubuntu HWE kernel and the kernel command line, before anything that
+# builds against the running kernel (the NVIDIA driver is DKMS). Settings in
+# config/group_vars/all.yml (kernel_*). Reboots a host at most once, only when
+# the grub command line changed or a newer kernel is installed than the one
+# running. Runs on its own (-l to pick hosts) or from slurm-cluster.yml.
+- hosts: "{{ hostlist | default('all') }}"
+  become: true
+  roles:
+    # gpus fact (lspci, works before any driver) decides the GPU options.
+    - facts
+  tasks:
+    - name: install the HWE kernel and its headers
+      apt:
+        name:
+          - "linux-generic-hwe-{{ kernel_hwe_release }}"
+          - "linux-headers-generic-hwe-{{ kernel_hwe_release }}"
+        state: present
+        update_cache: yes
+        cache_valid_time: 3600
+      environment: "{{ proxy_env if proxy_env is defined else {} }}"
+      when:
+        - kernel_hwe | bool
+        - ansible_distribution == 'Ubuntu'
+        - ansible_distribution_version == kernel_hwe_release
+
+    # The site owns this line (a fresh install has GRUB_CMDLINE_LINUX="").
+    # The regexp skips the Slurm role's "${GRUB_CMDLINE_LINUX} ..." line.
+    - name: set the kernel command line
+      lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX="(?!\$\{GRUB_CMDLINE_LINUX\})'
+        line: >-
+          GRUB_CMDLINE_LINUX="{{ ([kernel_cmdline_gpu if (ansible_local.gpus.count | default(0) | int) > 0 else '',
+          kernel_cmdline_extra] | select | join(' ')) }}"
+      register: kernel_grub_base
+
+    # Exactly the line roles/slurm/tasks/compute.yml adds (it has no regexp),
+    # so that task finds it and does not reboot the node in the middle of the
+    # Slurm play.
+    - name: add the Slurm cgroup options on compute nodes
+      lineinfile:
+        path: /etc/default/grub
+        insertafter: '^GRUB_CMDLINE_LINUX=[^\\$]'
+        line: 'GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX} cgroup_enable=memory swapaccount=1"'
+      register: kernel_grub_slurm
+      when: inventory_hostname in groups['slurm-node'] | default([])
+
+    - name: update grub
+      command: update-grub
+      when: kernel_grub_base is changed or kernel_grub_slurm is changed
+
+    - name: read the running kernel
+      command: uname -r
+      register: kernel_running
+      changed_when: false
+      check_mode: false
+
+    - name: read the newest installed kernel
+      shell: set -o pipefail; linux-version list | linux-version sort --reverse | head -n 1
+      args:
+        executable: /bin/bash
+      register: kernel_newest
+      changed_when: false
+      check_mode: false
+
+    - name: reboot into the new kernel or command line
+      reboot:
+        reboot_timeout: "{{ kernel_reboot_timeout }}"
+      when: >-
+        kernel_grub_base is changed or kernel_grub_slurm is changed or
+        kernel_running.stdout != kernel_newest.stdout
+
+    # Fact cache is 24 h: refresh ansible_kernel for later plays
+    # (roles/slurm/tasks/prolog_epilog.yml installs linux-tools-<kernel>).
+    - name: refresh kernel facts
+      setup:
+        gather_subset:
+          - "!all"
+          - "!min"
+          - platform
+
+    - name: running kernel
+      debug:
+        msg: "{{ ansible_kernel }}"
