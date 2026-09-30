@@ -145,14 +145,24 @@
     mode: "0755"
   when: slurm_build
 
+# kosmos: download to a file first so the tarball's sha256 can be checked
+# (slurm_src_sha256), then unpack it; upstream unpacks straight from the URL.
 - name: download source
+  get_url:
+    url: "{{ slurm_src_url }}"
+    dest: "{{ slurm_src_cache_dir }}/slurm-{{ slurm_version }}.tar.bz2"
+    checksum: "{{ ('sha256:' ~ slurm_src_sha256) if slurm_src_sha256 else omit }}"
+    mode: "0644"
+  environment: "{{ proxy_env if proxy_env is defined else {} }}"
+  when: slurm_build
+
+- name: unpack source
   unarchive:
-    src: "{{ slurm_src_url }}"
+    src: "{{ slurm_src_cache_dir }}/slurm-{{ slurm_version }}.tar.bz2"
     remote_src: yes
     dest: "{{ slurm_build_dir }}"
     extra_opts:
       - --strip-components=1
-  environment: "{{ proxy_env if proxy_env is defined else {} }}"
   when: slurm_build
 
 - name: clean src dir
