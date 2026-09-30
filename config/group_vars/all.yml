@@ -159,8 +159,9 @@ gpu_clock_lock: "1507,1507"
 nvidia_driver_force_install: false
 # Default NVIDIA driver branch for generic host driver installs.
 # kosmos: one branch for every GPU node. 580 is NVIDIA's long-term support
-# branch and drives every GPU in nvidia_gpu_architectures below; on Ubuntu
-# 26.04 only 580 and 595 are real server branches (535/550/570 install 580).
+# branch and drives every GPU in nvidia_gpu_architectures below. Ubuntu
+# 24.04 noble-updates carries nvidia-headless-580-server and
+# nvidia-fabricmanager-580 580.178.04 (checked 2026-09-30).
 # See docs/kosmos/gpu-inventory.md.
 nvidia_driver_branch: "580"
 # Set true on Ubuntu systems that require NVIDIA open kernel modules.
@@ -307,10 +308,11 @@ maas_python_reqs:
 # NVIDIA Datacenter GPU Manager                                                #
 ################################################################################
 install_dcgm: true
-# kosmos: DCGM 4. The role default "datacenter-gpu-manager" is DCGM 3, which
-# NVIDIA's ubuntu2604 repo does not carry. The -cudaNN package must match the
-# driver's CUDA major version: 13 for the 580 branch and newer. Nodes that
-# still hold DCGM 3 (the 22.04 install) will refuse the switch.
+# kosmos: DCGM 4 (the role default "datacenter-gpu-manager" is DCGM 3). NVIDIA's
+# ubuntu2404 repo carries datacenter-gpu-manager-4-cuda13 4.7 (checked
+# 2026-09-30); the role picks the repo from the OS version. The -cudaNN
+# package must match the driver's CUDA major version: 13 for the 580 branch
+# and newer.
 dcgm_pkg_name: "datacenter-gpu-manager-4-cuda{{ '13' if (nvidia_driver_branch | int) >= 580 else '12' }}"
 
 ################################################################################
