@@ -11,7 +11,8 @@ Read these first, in this order:
    driver installs) when doing one of those tasks.
 
 Site facts not in those files: the Ansible node is teuwen-ansible (Ubuntu
-24.04), the shared venv is `/opt/kosmos-cluster/env`, sudo on cluster nodes
+24.04), the shared venv for this branch is `/opt/kosmos-cluster/env-26.07`
+(`/opt/kosmos-cluster/env` is master's, ansible-core 2.16), sudo on cluster nodes
 requires a password (run playbooks with `-K`), and the cluster runs Slurm
 23.02 on Ubuntu 22.04 nodes until the clean reinstall from 2026-10-05, after
 which it runs Slurm 26.05.4 on Ubuntu 24.04 with the HWE 7.0 kernel
