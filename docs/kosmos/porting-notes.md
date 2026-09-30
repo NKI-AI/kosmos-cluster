@@ -423,7 +423,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 |---|-------|-------------|-------------|-----|--------|
 | 0a | `ansible.cfg` | `pipelining = True` (upstream) | `pipelining = False` (EricMarcus-ai, 2024-06-03, "Disable ansible pipelining", no reason given) | Pipelining halves the SSH round-trips per task. It only fails when sudo enforces `requiretty`, which the nodes do not (checked on gaia). Flip: set `pipelining = False` | (not applied, branch keeps upstream) |
 | 0b | `ansible.cfg` | no `[galaxy]` section (upstream) | `[galaxy] server = https://old-galaxy.ansible.com/` (Musab, 2023-11-02) | Temporary workaround from the late-2023 Galaxy migration; the host no longer serves content and 26.07 requirements resolve on galaxy.ansible.com. Flip: re-add the section | (not applied, branch keeps upstream) |
-| 0d | `ansible.cfg` | `fact_caching_connection = ~/.ansible/fact_cache` (per user; Ansible expands `~` and creates the directory) | upstream and master: `/var/tmp/ansible_cache` | On teuwen-ansible that directory is `root:teu-ansible` mode 0700, so every admin got "error in 'jsonfile' cache ... disabling plugin" and facts were gathered on every run. A per-user path needs no shared directory or group. Flip: restore the path and `chmod` / `chgrp` the directory for the admin group | 2026-09-08 |
+| 0d | `ansible.cfg` | `/var/tmp/ansible_cache` (same as upstream; per-user `~/.ansible/fact_cache` from 2026-09-08 reverted 2026-09-30) | `/var/tmp/ansible_cache` | On 2026-09-08 the directory was `root:teu-ansible` mode 0700, which disabled the jsonfile cache for every admin. It is now `770` `root:teuwen-sudoers` (checked 2026-09-30). Flush with `--flush-cache` after an OS reinstall so 22.04 facts are not reused for a day. | 2026-09-30 |
 | 0c | `ansible.cfg` | no `control_path` override: ssh control sockets go to Ansible's default `~/.ansible/cp`, which Ansible creates itself | upstream (since the 2018 initial commit, no reason given): `control_path = ~/.ssh/ansible-%%r@%%h:%%p` | With the upstream setting Ansible fails on a fresh account until `~/.ssh` exists, and nothing creates it (`UserKnownHostsFile=/dev/null` in the same file means ssh never writes `known_hosts` there either). Bit kosmas-ans on 2026-09-03. Where the sockets live makes no functional difference. Flip: restore the line and `mkdir -m 700 ~/.ssh` | chunk 7 |
 | 0e | `ansible.cfg` | `interpreter_python = /usr/bin/python3` | upstream (Adam Tetelman, 2021-12-10) and master: `ansible_python_interpreter = /usr/bin/python3` under `[defaults]` | The upstream line is a no-op: `ansible_python_interpreter` is an inventory variable, not an ansible.cfg key, so Ansible ignored it (`ansible-config dump` showed `INTERPRETER_PYTHON` at its default `auto`) and fell back to discovery, printing the "discovered Python interpreter at /usr/bin/python3.10 ... future installation of another Python interpreter could change the meaning of that path" warning for every host. `interpreter_python` is the real key. Verified 2026-09-08: all ten compute nodes resolve `/usr/bin/python3` to python3.10, and an ad-hoc ping of hamilton no longer warns. Flip: restore the old line (and the warning) | 2026-09-08 |
 | 1 | `scripts/setup.sh` | venv default `/opt/kosmos-cluster/env` | venv in `./env` (upstream default) | Shared venv on teuwen-ansible, one Ansible for all admins; clones are per admin (decided 2026-09-08, see "Setup decision") | b084b7f1 |
@@ -767,12 +767,11 @@ area has several leftovers that need a decision (update or remove).
 
 ### Ansible node (found while building env-26.07)
 
-- Fixed 2026-09-08 (deviation 0d): `ansible.cfg` pointed the fact cache at
-  `/var/tmp/ansible_cache`, which on teuwen-ansible is `root:teu-ansible`
-  mode 0700, so every admin got "error in 'jsonfile' cache ... disabling
-  plugin" and facts were gathered on every run. Now `~/.ansible/fact_cache`,
-  per user; verified with a local `setup` run that the directory is created
-  and the warning is gone.
+- Deviation 0d (2026-09-08) pointed the fact cache at `~/.ansible/fact_cache`
+  because `/var/tmp/ansible_cache` was `root:teu-ansible` mode 0700. The
+  directory is now `770` `root:teuwen-sudoers` (mtime 2026-09-08 11:58, about
+  half an hour after that commit). Reverted to `/var/tmp/ansible_cache` on
+  2026-09-30. After a node OS reinstall, run with `--flush-cache`.
 
 ### Fact gathering fails on nodes with many NFS submounts (found 2026-09-04)
 
