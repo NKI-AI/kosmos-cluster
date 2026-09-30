@@ -7,11 +7,16 @@
     name: wget
     state: present
 
+# Downloaded in check mode too, so a check run can compare versions.
 - name: Download Apptainer package
   get_url:
     url: "{{ apptainer_download_url }}"
     dest: "/tmp/{{ apptainer_package }}"
+    checksum: "{{ ('sha256:' ~ apptainer_sha256) if apptainer_sha256 else omit }}"
+  check_mode: false
 
+# allow_downgrade: the pin wins over a newer hand-installed version.
 - name: Install Apptainer
   apt:
     deb: "/tmp/{{ apptainer_package }}"
+    allow_downgrade: true

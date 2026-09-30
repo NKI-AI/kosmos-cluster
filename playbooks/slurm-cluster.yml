@@ -162,6 +162,12 @@
   import_playbook: container/singularity.yml
   when: slurm_cluster_install_singularity|default(true)
 
+- name: Install Apptainer (kosmos)
+  import_playbook: container/apptainer.yml
+  vars:
+    hostlist: slurm-node
+  when: slurm_cluster_install_apptainer|default(false)
+
 - name: Install Open OnDemand
   import_playbook: slurm-cluster/open-ondemand.yml
   when: install_open_ondemand

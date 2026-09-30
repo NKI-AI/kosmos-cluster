@@ -157,6 +157,14 @@ slurm_cluster_install_nvidia_driver: yes
 # kosmos: Singularity is replaced by Apptainer (playbooks/container/apptainer.yml);
 # upstream's singularity playbook is broken in 26.07 anyway.
 slurm_cluster_install_singularity: no
+# kosmos: Apptainer on the compute nodes (slurm-node; the hostlist is in
+# playbooks/slurm-cluster.yml). One version everywhere: roles/apptainer
+# installs the GitHub release .deb and downgrades a newer one. 1.5.4
+# (2026-09-22) fixes a high-severity privilege escalation in 1.5.x suid mode;
+# the checksum is the release asset's sha256 digest.
+slurm_cluster_install_apptainer: yes
+apptainer_version: "1.5.4"
+apptainer_sha256: "281cf9bd68f16b6f7c34a3a94d77668bc327b9c09db0412ce7890162734a97f7"
 
 ################################################################################
 # NFS                                                                          #

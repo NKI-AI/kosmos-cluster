@@ -28,8 +28,9 @@ teuwen-ansible"). gaia's open-files problem is bypassed by gathering only
 the `min` fact subset (096cc2ec). Decided: docker pinned to 28.3
 (deviation 13), motd landscape task removed, nvtop pinned to 3.3.2
 (deviation 15), landscape-sysinfo replaced by a shell script in the motd
-role (deviation 17, 2026-09-16). Still pending with the admins: herakles driver
-metapackages/reboot, apptainer pin, podman-docker on herakles, joining
+role (deviation 17, 2026-09-16), apptainer pinned to 1.5.4 on the compute
+nodes (deviation 22, 2026-09-30). Still pending with the admins: herakles driver
+metapackages/reboot, podman-docker on herakles, joining
 atlas to the realm. Everything on
 `master` up to e812a659 has been ported, dropped with a row below, or
 superseded upstream.
@@ -446,6 +447,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 19 | `config/group_vars/all.yml` | `dcgm_pkg_name: datacenter-gpu-manager-4-cuda13` (derived from `nvidia_driver_branch`: 13 for 580 and newer, else 12) | role default `datacenter-gpu-manager` (DCGM 3) | NVIDIA's ubuntu2604 repository carries only DCGM 4. On the 22.04 nodes DCGM 3.3.6 is held, so the switch only happens on the reinstall. Flip: delete the line | 2026-09-29 |
 | 20 | `roles/facts/files/gpus.fact`, `playbooks/nvidia-software/nvidia-driver.yml`, `config/group_vars/all.yml` | the `gpus` fact adds `pci_ids` (vendor:device of the NVIDIA display controllers) and `nvswitch_count`, both from `lspci -n` (`count` unchanged); the driver playbook refuses a GPU missing from `nvidia_gpu_architectures`, or a legacy architecture (Maxwell, Pascal, Volta) with a branch above 580 or the open kernel modules | `gpus` reports only `count` (by `lspci` name match); no check | Drivers are chosen per architecture and the choice has to be made before a driver exists on a freshly installed node, so it cannot come from `nvidia-smi`; `lspci` names are not reliable (22.04 does not know the H100). Tested 2026-09-29 on six node types: same `count` as the old script. Flip: `git checkout master -- roles/facts/files/gpus.fact` and delete the assert | 2026-09-29 |
 | 21 | `roles/slurm/templates/etc/slurm/gres.conf`, `config/group_vars/slurm-cluster.yml` | `gres.conf` is `AutoDetect=nvidia` when `slurm_version` is 24.11 or newer (`slurm_gres_autodetect`); below that the generated per-GPU lines are unchanged; the `gpu_topology` host_vars of carlos, plato and schrodinger are deleted | one `Name=gpu File=/dev/nvidiaN Cores=<local_cpulist>` line per GPU from the topology fact, or `AutoDetect=nvml` (which installs CUDA on every Slurm host and builds against NVML) | The generated `Cores=` lists are Linux CPU thread ids (e.g. `0-9,20-29` on a 20-core node); Slurm rejects any list containing an id at or above the core count ("invalid GRES core specification", `bit_unfmt`), so no node had GPU-CPU affinity (survey 2026-09-30, `docs/kosmos/gpu-inventory.md`). The fact also assumes `/dev/nvidiaN` follows PCI order, which is false on six nodes, and aristarchus carried a hand-edited file with two GPUs on the wrong socket. AutoDetect=nvidia (Slurm 24.11+) reads the driver's device minors and converts `local_cpulist` to Slurm core ids, without NVML; it detects no NVLinks. An untyped `Gres=gpu:N` in slurm.conf still matches (the detected type is dropped). The driver must be loaded before slurmd starts. Flip: set `slurm_gres_autodetect: ""` | 2026-09-30 |
+| 22 | `roles/apptainer`, `playbooks/container/apptainer.yml`, `playbooks/slurm-cluster.yml`, `config/group_vars/slurm-cluster.yml` | Apptainer 1.5.4 pinned in site config with the release .deb's sha256; the role checksums the download (also in check mode) and installs with `allow_downgrade`; `slurm-cluster.yml` runs it on `slurm-node` behind `slurm_cluster_install_apptainer`; the playbook's default hostlist is `slurm-node` | role default 1.3.3, no checksum, fails on nodes with a newer version; playbook run by hand, default hostlist `all` | Versions had drifted (1.3.3 on eight nodes, 1.4.0 on gaia, 1.5.3 from the PPA on aristarchus), so a container job could behave differently per node, and the role could not bring the two newer nodes back. 1.5.4 (2026-09-22) is the latest release and fixes a high-severity privilege escalation in 1.5.x suid mode. The login node stays without Apptainer for now (team to confirm). Flip: `slurm_cluster_install_apptainer: no` | 2026-09-30 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -555,7 +557,8 @@ and Slurm is upgraded. Everything below waits for that day; until then only
 4. Other items that touch live nodes and are waiting for this day:
    herakles driver metapackages and reboot (Check-run results,
    2026-09-04); podman-docker vs docker-ce on herakles and the docker
-   upgrade on gaia and eudoxus (5b); apptainer pin and version drift (4c);
+   upgrade on gaia and eudoxus (5b); the first run of `apptainer.yml`
+   (1.5.4 on every compute node, deviation 22);
    nofile limit on gaia (facts gathering); the first real run of
    `nvtop.yml`, which rebuilds nvtop 3.3.2 on the nine GPU nodes
    (deviation 15); the first real run of `motd.yml` after deviation 17
@@ -571,8 +574,9 @@ and Slurm is upgraded. Everything below waits for that day; until then only
   the monitoring section installs docker-ce on every host, which fails on
   herakles (podman-docker) and upgrades docker on gaia and eudoxus (5b);
   the inline `hostlist=` on three `import_playbook` lines is ignored, so
-  NHC and DCGM also targeted atlas and kosmos (4e, fixed); the apptainer role fails
-  on gaia and aristarchus, which run newer versions than the pin (4c).
+  NHC and DCGM also targeted atlas and kosmos (4e, fixed); the apptainer role failed
+  on gaia and aristarchus, which run newer versions than the pin (4c; fixed,
+  deviation 22: it now downgrades).
 - **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
   (Fixed on this branch: the dead per-host overrides in host_vars, 5a,
   deviation 14; the unpinned nvtop build, 4b, deviation 15; fact
@@ -713,15 +717,17 @@ and Slurm is upgraded. Everything below waits for that day; until then only
 Ported as on master because nothing in 26.07 has the same name, but this
 area has several leftovers that need a decision (update or remove).
 
-- **Version drift, and the role fails on the drifted nodes.**
-  `roles/apptainer/defaults/main.yml` pins 1.3.3, and eight of ten nodes
-  run exactly that. gaia runs 1.4.0 and aristarchus 1.5.3 (the current
-  upstream release), both from a .deb installed by hand or with a
-  different pin. The role installs with `apt: deb:` without
-  `allow_downgrade`, so on those two nodes the task fails with "A later
-  version is already installed" instead of downgrading (corrected
-  2026-09-08). Decide the pin (1.5.3 is the obvious choice), and move it to
-  `config/group_vars` rather than the role's defaults.
+- **Version drift, and the role fails on the drifted nodes. Fixed
+  2026-09-30 (deviation 22).** The role pinned 1.3.3, and eight of ten nodes
+  ran exactly that. gaia ran 1.4.0 (a .deb installed by hand) and aristarchus
+  1.5.3 from the Apptainer PPA (`ppa:apptainer/ppa`, so it moved with every
+  `apt upgrade`). The role installed with `apt: deb:` without
+  `allow_downgrade`, so on those two nodes it failed with "A later version is
+  already installed". Now: `apptainer_version: "1.5.4"` and its sha256 in
+  `config/group_vars/slurm-cluster.yml`, the download is checksummed (and
+  runs in check mode so check runs compare versions), and the install
+  downgrades a newer package. The PPA is not used: it is what drifted, and
+  Launchpad drops superseded versions, so an exact pin would break.
 - **Two container runtimes on the nodes.** Besides apptainer, every node
   (not only gaia) still has Singularity 3.7.1 in
   `/usr/local/bin/singularity` (config under `/usr/local/etc/singularity`)
@@ -729,9 +735,12 @@ area has several leftovers that need a decision (update or remove).
   role before apptainer arrived. Apptainer ships its own `singularity`
   alias, so the old binary is shadowed only if `/usr/bin` wins in `PATH`.
   Candidate for removal once nobody depends on it.
-- **Not wired into the top-level playbook.** `playbooks/container/apptainer.yml`
-  is run by hand, on master and here. Adding it to `playbooks/slurm-cluster.yml`
-  behind a variable would make apptainer part of a normal node build.
+- **Wired into the top-level playbook (deviation 22).** `playbooks/slurm-cluster.yml`
+  runs `container/apptainer.yml` on `slurm-node` when
+  `slurm_cluster_install_apptainer` is true (site config: yes). The login node
+  (kosmos) and the controller do not get it; the playbook's own default
+  hostlist is `slurm-node` too. To add kosmos, change the hostlist to
+  `slurm-node:slurm-login` in both places.
   (Singularity install is off since deviation 6; upstream's singularity
   playbook is broken in 26.07 anyway.)
 
@@ -812,9 +821,9 @@ area has several leftovers that need a decision (update or remove).
   2024-06-05). Decided 2026-09-04: keep both disabled. ssh to the compute
   nodes works through Kerberos and sudo stays password-protected (`-K`),
   which is sensible for a shared cluster.
-- `playbooks/slurm-cluster/mount_scratch_disks.yml` and
-  `playbooks/container/apptainer.yml` are not in the top-level playbook on
-  master either; they only run when someone runs them by hand.
+- `playbooks/slurm-cluster/mount_scratch_disks.yml` is not in the top-level
+  playbook on master either; it only runs when someone runs it by hand.
+  `playbooks/container/apptainer.yml` is, since deviation 22.
 
 ### Inventory and host_vars (chunk 5a)
 

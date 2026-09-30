@@ -1,4 +1,5 @@
-- hosts: "{{ hostlist | default('all') }}"
+# kosmos: compute nodes only by default (not the login node or the controller).
+- hosts: "{{ hostlist | default('slurm-node') }}"
   become: true
   become_method: sudo
   roles:
