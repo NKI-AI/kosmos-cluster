@@ -13,6 +13,8 @@
     dest: /etc/munge/munge.key
     mode: 0400
     owner: munge
+  # kosmos: the key is derived from slurm_password; keep it out of --diff
+  diff: false
   notify:
     - restart munge
 

@@ -166,6 +166,8 @@
     dest: "{{ slurm_config_dir }}/slurmdbd.conf"
     owner: "{{ slurm_username }}"
     mode: 0600
+  # kosmos: StoragePass is slurm_db_password; keep it out of --diff
+  diff: false
   notify:
   - restart slurmdbd
   tags:
