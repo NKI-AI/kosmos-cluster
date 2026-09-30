@@ -1,19 +1,37 @@
 #!/bin/bash
-SOCKETS=`lscpu | grep "Socket(s):"  | cut -d : -f 2 | awk '{print $1}'`
-THREADSPERCORE=`lscpu | grep "Thread(s) per core:" | cut -d : -f 2 | awk '{print $1}'`
-CORESPERSOCKET=`lscpu | grep "Core(s) per socket:" | cut -d : -f 2 | awk '{print $1}'`
+# cpu_topology from lscpu (integers). gpu_topology is cpulistaffinity per
+# NVIDIA GPU bus, same PCI classes as gpus.fact (0300 VGA, 0302 3D). Do not
+# match lspci names: an old pci.ids does not know newer GPUs.
+SOCKETS=$(lscpu | grep "Socket(s):" | cut -d : -f 2 | awk '{print $1}')
+THREADSPERCORE=$(lscpu | grep "Thread(s) per core:" | cut -d : -f 2 | awk '{print $1}')
+CORESPERSOCKET=$(lscpu | grep "Core(s) per socket:" | cut -d : -f 2 | awk '{print $1}')
+SOCKETS=${SOCKETS:-0}
+THREADSPERCORE=${THREADSPERCORE:-0}
+CORESPERSOCKET=${CORESPERSOCKET:-0}
+physical_cores=$((SOCKETS * CORESPERSOCKET))
+logical_cpus=$((SOCKETS * CORESPERSOCKET * THREADSPERCORE))
+
+gpus_csv=""
+if command -v lspci >/dev/null 2>&1; then
+    while read -r bdf; do
+        [ -n "$bdf" ] || continue
+        bdf="${bdf#0000:}"
+        bus="${bdf%%:*}"
+        aff=$(cat "/sys/class/pci_bus/0000:${bus}/cpulistaffinity" 2>/dev/null || true)
+        gpus_csv="${gpus_csv}\"${aff}\","
+    done <<EOF
+$(lspci -n -d 10de: | awk '$2 == "0300:" || $2 == "0302:" {print $1}')
+EOF
+    gpus_csv="${gpus_csv%,}"
+fi
+
 echo "{"
 echo "  \"cpu_topology\": {"
-echo "    \"sockets\": \"$SOCKETS\","
-echo "    \"cores_per_socket\": \"$CORESPERSOCKET\","
-echo "    \"threads_per_core\": \"$THREADSPERCORE\"",
-echo "    \"physical_cores\": \"$(expr $SOCKETS \* $CORESPERSOCKET)\"",
-echo "    \"logical_cpus\": \"$(expr $SOCKETS \* $CORESPERSOCKET \* $THREADSPERCORE)\""
+echo "    \"sockets\": ${SOCKETS},"
+echo "    \"cores_per_socket\": ${CORESPERSOCKET},"
+echo "    \"threads_per_core\": ${THREADSPERCORE},"
+echo "    \"physical_cores\": ${physical_cores},"
+echo "    \"logical_cpus\": ${logical_cpus}"
 echo "  },"
-echo "  \"gpu_topology\": ["
-gpus=$(for i in `lspci | grep -E "(3D|VGA compatible) controller: NVIDIA" | awk '{print $1}' | sed 's/^0000://g' | cut -d : -f 1`; do \
-    echo -n \"$(cat /sys/class/pci_bus/0000:$i/cpulistaffinity)\",; done | sed 's/,$//')
-echo "    $gpus"
-echo "  ]"
+echo "  \"gpu_topology\": [${gpus_csv}]"
 echo "}"
-

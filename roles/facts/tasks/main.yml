@@ -23,9 +23,13 @@
   with_fileglob:
     - '*'
 
+# Explicit setup ignores ansible_gather_subset; !all/!min skips gaia's
+# mount collector. Reload ansible_local after copying facts.d.
 - name: regather local facts
   setup:
     gather_subset:
+      - "!all"
+      - "!min"
       - local
     filter:
       - ansible_local

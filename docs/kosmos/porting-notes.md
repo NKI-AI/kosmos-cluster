@@ -615,8 +615,12 @@ and Slurm is upgraded. Everything below waits for that day; until then only
 - Implicit gather `min` is `ansible_gather_subset` in
   `config/group_vars/slurm-cluster.yml`. Site facts stay in `ansible_local`
   via `roles/facts` (always refresh on the slurm.conf path, not the 24 h
-  cache). Hardware/network only if a play needs them. NHC `nhc.conf.j2`
-  uses `ansible_local.memory` and no longer loops `ansible_interfaces`.
+  cache). The role's post-copy `setup` uses `!all`/`!min`/`local`, same as
+  `gather-slurm-nodes.yml`. `memory.fact` reports integer `memtotal_mb` and
+  `total_mb` (95% of MemTotal). `topology.fact` lists GPUs by the same PCI
+  classes as `gpus.fact`. Hardware/network only if a play needs them. NHC
+  `nhc.conf.j2` uses `memtotal_mb` for the physmem window and no longer
+  loops `ansible_interfaces`.
   `create_mounts.yml` does not gather facts because its role does not consume
   any.
 
@@ -781,9 +785,8 @@ area has several leftovers that need a decision (update or remove).
   when unused), which is why the same step can pass at one moment and fail
   ten minutes later. **Not an upgrade regression:** ansible-core 2.16 in the
   old env fails identically. slurm.conf uses only the custom facts
-  (`ansible_local`). NHC `check_hw_physmem` now uses
-  `ansible_local.memory.total_mb` (already 95% of MemTotal; the template
-  divides by 0.95 so the ±5% window is the same as before) and the
+  (`ansible_local`). NHC `check_hw_physmem` uses
+  `ansible_local.memory.memtotal_mb` (±5% of MemTotal) and the
   commented `check_hw_eth` loop is gone.
 - Fix options: (a) `ansible_gather_subset: [min]` on `slurm-cluster` so
   implicit gather never runs the mount collector (see Facts gathering);

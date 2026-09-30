@@ -4,9 +4,8 @@
  {{ ansible_hostname }} || check_hw_cpuinfo {{ ansible_local.topology.cpu_topology.sockets }} {{ ansible_local.topology.cpu_topology.physical_cores }} {{ ansible_local.topology.cpu_topology.logical_cpus }}
 
 # Check memory
-# ansible_local.memory.total_mb is already 95% of MemTotal (same as slurm.conf
-# RealMemory). Reconstruct MemTotal so the ±5% window matches the old check.
-{% set nhc_memtotal_mb = ansible_local.memory.total_mb / 0.95 %}
+# memtotal_mb is MemTotal; total_mb is 95% (slurm.conf RealMemory).
+{% set nhc_memtotal_mb = ansible_local.memory.memtotal_mb | default((ansible_local.memory.total_mb / 0.95) | round | int) %}
  {{ ansible_hostname }} || check_hw_physmem {{ (nhc_memtotal_mb * 0.95) | round | int }}m {{ (nhc_memtotal_mb * 1.05) | round | int }}m
 
 # Check that the root filesystem is mounted rw

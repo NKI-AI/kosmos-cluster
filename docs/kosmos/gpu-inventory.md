@@ -24,8 +24,9 @@ only GPU the 590+ branches and the open kernel modules cannot drive.
 The same data is in the `gpus` custom fact on every node
 (`roles/facts/files/gpus.fact`): `count`, `pci_ids` and `nvswitch_count`,
 read from the PCI bus so they are there before any driver is installed.
-Match GPUs on PCI IDs, not names: Ubuntu 22.04's `lspci` shows the H100 as
-"Device [10de:2330]".
+`topology.fact` uses the same class filter (`0300`/`0302`) for
+`gpu_topology` (cpulistaffinity per GPU bus). Match GPUs on PCI IDs, not
+names: Ubuntu 22.04's `lspci` shows the H100 as "Device [10de:2330]".
 
 ## Driver branch: 580 everywhere
 
