@@ -33,8 +33,10 @@ slurm_manage_gpus: true
 
 slurm_cluster_name: kosmos
 
-slurm_password: ReplaceWithASecurePasswordInTheVault
-slurm_db_password: AlsoReplaceWithASecurePasswordInTheVault
+# See docs/kosmos/slurm-secrets.md
+kosmos_slurm_secrets_file: "{{ lookup('env', 'KOSMOS_SLURM_SECRETS_FILE') | mandatory }}"
+slurm_password: "{{ (lookup('file', kosmos_slurm_secrets_file) | from_yaml).slurm_password | mandatory }}"
+slurm_db_password: "{{ (lookup('file', kosmos_slurm_secrets_file) | from_yaml).slurm_db_password | mandatory }}"
 
 slurm_default_job_timelimit: 60
 slurm_grace_time: 120  # time in seconds to allow for job cleanup

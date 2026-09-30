@@ -14,6 +14,7 @@
 /admin.conf
 # kosmos-cluster: site config is version-controlled in this fork
 #/config*/
+.slurm-secrets.yaml
 !/config.example/
 /roles/galaxy/
 /collections/*
