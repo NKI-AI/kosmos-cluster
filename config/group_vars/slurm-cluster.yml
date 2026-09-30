@@ -204,6 +204,12 @@ slurm_cluster_install_nvidia_driver: yes
 slurm_cluster_install_apptainer: yes
 apptainer_version: "1.5.4"
 apptainer_sha256: "281cf9bd68f16b6f7c34a3a94d77668bc327b9c09db0412ce7890162734a97f7"
+# kosmos: nodestat (roles/nodestat) on slurm-node and slurm-login. Pinned to
+# a commit of github.com/edupooch/nodestat; the checksum is the sha256 of
+# nodestat.py at that commit. 0.16 (2026-07-14).
+slurm_cluster_install_nodestat: yes
+nodestat_version: "4bf9b5f37ae83e9949966f1beee618e048aff728"
+nodestat_sha256: "faf5dffb7a3e338724439c110d82ba0ddfedd54b52f2f19ba0727ea95defeee1"
 
 ################################################################################
 # NFS                                                                          #

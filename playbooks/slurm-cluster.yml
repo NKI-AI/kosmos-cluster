@@ -114,6 +114,10 @@
 - name: Install nvtop (kosmos)
   import_playbook: slurm-cluster/nvtop.yml
 
+- name: Install nodestat (kosmos)
+  import_playbook: slurm-cluster/nodestat.yml
+  when: slurm_cluster_install_nodestat|default(false)
+
 - name: Install the NVIDIA HPC SDK
   import_playbook: nvidia-software/nvidia-hpc-sdk.yml
   vars:

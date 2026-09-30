@@ -117,7 +117,8 @@ That is harmless; power it off or ignore it.
 
    Driver 580 (and fabric manager on herakles), DCGM 4, Slurm 26.05.4 build,
    munge, MariaDB/slurmdbd/slurmctld and the QOS on atlas, slurmd on the
-   nodes, NHC, Apptainer on the compute nodes, monitoring, motd, nvtop.
+   nodes, NHC, Apptainer on the compute nodes, monitoring, motd, nvtop,
+   nodestat.
    Nodes that cannot be reached are listed as "left out of slurm.conf".
 4. **First batch only, accounting.** Copy `sacctmgr-dump.cfg` from step 1.2
    to atlas, then `sacctmgr load file=sacctmgr-dump.cfg` **without `-i`**:
@@ -145,6 +146,8 @@ That is harmless; power it off or ignore it.
      `srun apptainer exec docker://alpine true` (user namespaces under
      24.04's AppArmor); kosmos has no Apptainer.
    - One ssh login per host type: banner once, sysinfo block once.
+   - `nodestat`, `nodestat -j`, `nodestat -g` on kosmos: every node that is
+     in, CPU/GPU/memory counts that match `sinfo` and `squeue`.
    - Logs on atlas and a node: `grep -Ei 'defunct|deprecated|error'
      /var/log/slurm/*.log`.
    - Load: `sbatch --array=1-500 -p <partition> --wrap 'sleep 30'` on the
@@ -170,7 +173,8 @@ to 23.02 other than the backups from step 1.
    section) and what was deferred: gorgophone, the file servers, Apptainer
    on kosmos.
 2. Branch cleanup. Everything from these branches is on `deepops-26.07` or
-   deliberately left behind (the stepped-upgrade playbook, nodestat). Tag
+   deliberately left behind (the stepped-upgrade playbook; nodestat is now
+   a role). Tag
    each tip `archive/<branch>` and push the tags, then delete
    `slurm-upgrade-fixes`, `merge/slurm-upgrade-into-deepops`,
    `slurm-upgrade-26.04`, `nvidia-drivers-26.04`, `nodestat`,
@@ -180,7 +184,7 @@ to 23.02 other than the backups from step 1.
 
 ## What changed on purpose
 
-Deviations 23-31 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
+Deviations 23-32 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
 commits cherry-picked onto `reinstall-prep` (exporter restart and local
 build, retired Singularity wrapper, epilog/prolog fixes, NHC sshd match,
 pam_slurm_adopt guard, slurmd PATH).

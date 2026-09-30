@@ -1,0 +1,6 @@
+---
+# kosmos: nodestat on the compute nodes and the login node.
+- hosts: "{{ hostlist | default('slurm-node:slurm-login') }}"
+  become: true
+  roles:
+    - nodestat
