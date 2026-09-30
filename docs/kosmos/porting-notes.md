@@ -39,7 +39,7 @@ superseded upstream.
 of the twelve hosts on Ubuntu 24.04.5 with the HWE 7.0 kernel and a fresh
 Slurm 26.05.4 install with a new accounting database, not an in-place
 upgrade. carlos, plato, mariecurie and schrodinger are gone. Branch
-`reinstall-prep` prepares for it (deviations 23-30, 25 upstream commits
+`reinstall-prep` prepares for it (deviations 23-31, 25 upstream commits
 cherry-picked); the order of work is in `docs/kosmos/reinstall-runbook.md`.
 Check-run results below were taken on the 22.04 install and describe it.
 
@@ -471,6 +471,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 28 | `roles/slurm/tasks/controller.yml`, `config/group_vars/slurm-cluster.yml` (`slurm_qos`) | creates every QOS in `slurm_qos` and sets its limits (`sacctmgr modify qos`); asserts that every name in a partition's `slurm_allow_qos` is defined | only the cluster, `compute-account` and the running admin are created; QOS were made by hand | Partitions allow only these QOS and `AccountingStorageEnforce` includes qos, so on a fresh database jobs could not run and `sacctmgr load` of the old associations would fail without them. Flip: `slurm_qos: {}` and drop the tasks | 2026-09-30 |
 | 29 | `config/group_vars/slurm-cluster.yml` | `slurm_exporter_build_dir: "{{ deepops_dir }}/build/slurm-exporter"` | upstream role default `/opt/deepops/build/slurm-exporter` | The DeepOps-owned exporter (upstream 7393884e, 59fa7a00, cherry-picked) builds its image locally; every other build directory derives from `deepops_dir`. Flip: delete the line | 2026-09-30 |
 | 30 | `config/group_vars/slurm-cluster.yml` | `slurm_password` and `slurm_db_password` read from the YAML file named by `KOSMOS_SLURM_SECRETS_FILE` (set at login on teuwen-ansible by `/etc/profile.d/kosmos-slurm-secrets.sh`); unset variable stops the run | the upstream placeholder strings in plain text | The munge key is derived from `slurm_password`; with the public placeholder anyone could compute it. A shared file for the teuwen-sudoers group instead of an Ansible vault (decided by the admins 2026-09-30); see `docs/kosmos/slurm-secrets.md`. Flip: put the two values back in group_vars | 2026-09-30 |
+| 31 | `playbooks/slurm-cluster/slurm-backup.yml` (new) | backs up the accounting database (mysqldump), `sacctmgr` dump, QOS and associations, the whole job history (`sacct` as text), state directory, configuration and installed Slurm files on the controller, and fetches everything except the state directory and installed files to `~/slurm-backups` on the Ansible node | nothing; backups by hand | Needed before the reinstall wipes atlas (runbook step 1.2). Taken from `slurm-upgrade-26.04` (Tim Veenboer, 1b167673, fix 0626c07b) without the stepped-upgrade playbook, which the clean reinstall made obsolete; added the job-history export and fetches the text exports. Flip: delete the file | 2026-09-30 |
 
 ### Master changes not carried over (superseded upstream)
 

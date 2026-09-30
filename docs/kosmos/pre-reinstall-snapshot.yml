@@ -3,8 +3,8 @@
 # clean install loses to the Ansible node, so the reinstalled nodes can be
 # compared with the old ones and nothing hand-made is lost silently.
 #
-#   ansible-playbook -K docs/kosmos/pre-reinstall-snapshot.yml
-#   ansible-playbook -K docs/kosmos/pre-reinstall-snapshot.yml -l atlas -e snapshot_prometheus=true
+#   ansible-playbook -kK docs/kosmos/pre-reinstall-snapshot.yml
+#   ansible-playbook -kK docs/kosmos/pre-reinstall-snapshot.yml -l atlas -e snapshot_prometheus=true
 #
 # Read-only on the hosts except a scratch directory under /var/tmp, which is
 # removed at the end. Output: ~/reinstall-snapshot/<host>/ on the Ansible node
@@ -15,8 +15,8 @@
 # the rsyslog tree of the compute nodes, Grafana's data, and with
 # snapshot_prometheus=true the Prometheus volume (can be large).
 #
-# The Slurm database itself is dumped by playbooks/slurm-cluster/slurm-backup.yml
-# (branch slurm-upgrade-fixes), see docs/kosmos/reinstall-runbook.md step B2.
+# The Slurm database itself is dumped by playbooks/slurm-cluster/slurm-backup.yml,
+# see docs/kosmos/reinstall-runbook.md step 1.2.
 - hosts: "{{ hostlist | default('slurm-cluster') }}"
   become: true
   gather_facts: false
