@@ -13,7 +13,9 @@ Read these first, in this order:
 Site facts not in those files: the Ansible node is teuwen-ansible (Ubuntu
 24.04), the shared venv is `/opt/kosmos-cluster/env`, sudo on cluster nodes
 requires a password (run playbooks with `-K`), and the cluster runs Slurm
-23.02 on Ubuntu 22.04 nodes.
+23.02 on Ubuntu 22.04 nodes until the clean reinstall from 2026-10-05, after
+which it runs Slurm 26.05.4 on Ubuntu 24.04 with the HWE 7.0 kernel
+(`docs/kosmos/reinstall-runbook.md`).
 
 Agents do not run on teuwen-ansible (IT security decision, 2026-09-29). An
 agent works in an admin's clone on another host and checks changes there with
