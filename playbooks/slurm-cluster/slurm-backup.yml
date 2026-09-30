@@ -159,20 +159,6 @@
         executable: /bin/bash
       changed_when: false
 
-    # kosmos: the whole job history as text, readable without a database
-    # (the reinstall starts a new one).
-    - name: export the job history
-      shell: |
-        set -o pipefail
-        {{ slurm_install_prefix }}/bin/sacct -a -P -S {{ slurm_backup_sacct_start }} -E now --format=ALL \
-          | gzip -1 > {{ slurm_backup_path }}/sacct-all.txt.gz
-      args:
-        executable: /bin/bash
-      async: 7200
-      poll: 15
-      changed_when: false
-      when: slurm_backup_sacct_start | length > 0
-
     - name: stop slurmdbd for a consistent dump
       systemd:
         name: slurmdbd
@@ -230,6 +216,35 @@
       args:
         executable: /bin/bash
       changed_when: false
+
+    # kosmos: the whole job history as text, readable without a database
+    # (the reinstall starts a new one). After the dump, so a failure here
+    # cannot cost the dump; needs slurmdbd, so it starts it again first.
+    - name: start slurmdbd for the job history export
+      systemd:
+        name: slurmdbd
+        state: started
+      when: slurm_backup_stop_slurmdbd | bool and slurm_backup_start_slurmdbd_after | bool and slurm_backup_sacct_start | length > 0
+
+    - name: wait for slurmdbd before the job history export
+      wait_for:
+        port: 6819
+        timeout: 600
+      when: slurm_backup_stop_slurmdbd | bool and slurm_backup_start_slurmdbd_after | bool and slurm_backup_sacct_start | length > 0
+
+    - name: export the job history
+      register: slurm_backup_sacct_job_export
+      shell: |
+        set -o pipefail
+        {{ slurm_install_prefix }}/bin/sacct -a -P -S {{ slurm_backup_sacct_start }} -E now --format=ALL \
+          | gzip -1 > {{ slurm_backup_path }}/sacct-all.txt.gz
+      args:
+        executable: /bin/bash
+      async: 7200
+      poll: 15
+      changed_when: false
+      # skipped when slurmdbd is to be left stopped
+      when: slurm_backup_sacct_start | length > 0 and (slurm_backup_start_slurmdbd_after | bool or not slurm_backup_stop_slurmdbd | bool)
 
     - name: check whether slurmctld is running
       command: systemctl is-active slurmctld
@@ -323,7 +338,7 @@
         src: "{{ slurm_backup_path }}/{{ item }}"
         dest: "{{ slurm_backup_fetch_dir }}/{{ inventory_hostname }}/{{ slurm_backup_path | basename }}/"
         flat: yes
-      loop: "{{ slurm_backup_fetch_files + (['sacct-all.txt.gz'] if slurm_backup_sacct_start | length > 0 else []) }}"
+      loop: "{{ slurm_backup_fetch_files + (['sacct-all.txt.gz'] if slurm_backup_sacct_job_export is not skipped else []) }}"
       vars:
         slurm_backup_fetch_files:
           - "{{ slurm_backup_db_name }}.sql.gz"
@@ -332,6 +347,8 @@
           - sacctmgr-assoc.txt
           - scontrol-show-config.txt
           - scontrol-show-nodes.txt
+          - squeue.txt
+          - sinfo.txt
           - slurm.conf.orig
           - etc.tgz
           - versions.txt

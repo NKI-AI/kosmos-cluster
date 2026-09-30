@@ -8,8 +8,9 @@
 #
 # Read-only on the hosts except a scratch directory under /var/tmp, which is
 # removed at the end. Output: ~/reinstall-snapshot/<host>/ on the Ansible node
-# (mode 0700). Per host: /etc as a tarball (without shadow, gshadow, the
-# Kerberos keytab and the ssh host private keys), the kernel command line,
+# (mode 0700). Per host: /etc and the user crontabs as a tarball (without
+# shadow, gshadow, the Kerberos keytab and the ssh host private keys), what
+# was installed by hand under /usr/local and /opt, the kernel command line,
 # package selections and holds, disks, mounts, enabled units, root's crontab,
 # nvidia-smi -q on GPU nodes. On the controller also: Slurm and MariaDB logs,
 # the rsyslog tree of the compute nodes, Grafana's data, and with
@@ -44,14 +45,16 @@
             --exclude=etc/shadow --exclude=etc/shadow- \
             --exclude=etc/gshadow --exclude=etc/gshadow- \
             --exclude=etc/krb5.keytab --exclude='etc/ssh/ssh_host_*_key' \
-            -C / etc 2>/dev/null || true
+            -C / etc var/spool/cron/crontabs 2>/dev/null || true
         dpkg --get-selections > dpkg-selections.txt
         {
           for c in "uname -a" "cat /etc/os-release" "cat /proc/cmdline" \
                    "grep -n GRUB_CMDLINE /etc/default/grub" "apt-mark showhold" \
                    "lsblk -f" "findmnt -l" "df -hT -x tmpfs -x devtmpfs" \
                    "ip -br addr" "systemctl list-unit-files --state=enabled --no-pager" \
-                   "crontab -l -u root" "mokutil --sb-state" "lspci -nn -d 10de:"; do
+                   "crontab -l -u root" "mokutil --sb-state" "lspci -nn -d 10de:" \
+                   "ls -la /usr/local/bin /usr/local/sbin /opt" \
+                   "ls -d /usr/local/lib/python3*/dist-packages/*"; do
             echo "### $c"; timeout 60 $c 2>&1; echo
           done
         } > info.txt
