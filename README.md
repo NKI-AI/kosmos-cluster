@@ -21,6 +21,9 @@
 > their own clone (home directory or wherever), pulls the latest changes before running
 > playbooks, and submits their own changes as pull requests.
 >
+> **Slurm secrets:** not in git. See
+> [docs/kosmos/slurm-secrets.md](docs/kosmos/slurm-secrets.md).
+>
 > **Adding or removing a compute node.** Everything lives in `config/`:
 >
 > - `config/inventory`: list the host under `[all]` (with `ansible_host=`), under

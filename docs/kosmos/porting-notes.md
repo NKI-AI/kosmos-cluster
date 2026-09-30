@@ -66,7 +66,9 @@ Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
    which installs both roles and collections into the paths from
    `ansible.cfg`). Nobody runs `scripts/setup.sh` on teuwen-ansible except to
    deliberately rebuild the shared venv: it pip-installs into that venv, needs
-   sudo for apt, and re-downloads the Galaxy content with `--force`.
+   sudo for apt, and re-downloads the Galaxy content with `--force`. Plays
+   that load site `slurm-cluster` group_vars need `KOSMOS_SLURM_SECRETS_FILE`
+   (see `docs/kosmos/slurm-secrets.md`).
 3. Fix the default partition (section 2, "Urgent"). Done: `rtx2080ti`.
 4. herakles: included in the tests as a normal node (decided 2026-09-04;
    see section 2, "Site config" for what a real run would change on it).
@@ -348,8 +350,8 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 `~kosmas-ans/check-slurm.log`. Findings, most important first:
 
 - **A real run would replace the munge key, and only on the hosts in the
-  run. Do not run `slurm.yml` for real on this branch before the vault
-  change (`docs/kosmos/slurm-secrets.md`) is rolled out on all
+  run. Do not run `slurm.yml` for real on this branch before the
+  secrets file (`docs/kosmos/slurm-secrets.md`) is rolled out on all
   twelve hosts in one run, on 2026-10-05.** The key is
   `slurm_password | password_hash('sha512', slurm_cluster_name)`. With the
   old env (ansible-core 2.16, no passlib) that gives the Python `crypt`
@@ -360,15 +362,15 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
   password now hashes to `$6$rounds=656000$kosmos$...`: a different key.
   The check shows the change on all three hosts. A limited real run would
   restart munge with the new key on those hosts and cut them off from the
-  rest. Consequences for the vault rollout: every host in one run, all
+  rest. Consequences for the secrets rollout: every host in one run, all
   from env-26.07 (two envs would produce two keys from the same password).
   Side findings: the current key derives from the public upstream
   placeholder, so anyone with the DeepOps repo can compute it (another
-  reason for the vault); `playbooks/utilities/user-password.yml` uses the
+  reason to replace it); `playbooks/utilities/user-password.yml` uses the
   same filter and will produce different hashes from the new env too
   (harmless: a password hash only has to verify, not match an old one).
   Not fixed: `rounds=5000` in the template would reproduce today's key,
-  but the key changes with the vault password anyway (decided 2026-09-08).
+  but the key changes with the new `slurm_password` anyway (decided 2026-09-08).
 - **A real run would reboot every compute node.** `roles/slurm/tasks/compute.yml`
   adds `GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX} cgroup_enable=memory swapaccount=1"`
   to `/etc/default/grub` with `lineinfile` (no regexp: the exact line must
@@ -529,8 +531,9 @@ issues were removed; corrections are marked "corrected 2026-09-08".
 - **Blocking a real run of `slurm.yml`: the munge key.** env-26.07 hashes
   `slurm_password` differently from the old env, so any real run rewrites
   the munge key on the hosts it touches and cuts them off from the rest
-  (see "Check-run results", 2026-09-08). Resolved by the vault rollout on
-  the maintenance day, below. Check runs are unaffected. (Earlier blocker,
+  (see "Check-run results", 2026-09-08). Resolved by the reinstall: every
+  host gets the key derived from the secrets file (deviation 30) on its
+  first run from env-26.07. Check runs are unaffected. (Earlier blocker,
   admin login to kosmos, was restored by IT on 2026-09-08; step 6 of
   "Before the first run" is done.)
 - **Ansible node access, not blocking:** atlas has no Kerberos host
@@ -879,11 +882,11 @@ area has several leftovers that need a decision (update or remove).
   - The first `--check --diff` run of the new branch against all nodes will
     list these gaps per node; that output is the to-do list for bringing the
     nodes back in line.
-- `slurm_password` / `slurm_db_password` are still the upstream placeholder
-  strings, on master and here. They should live in an Ansible vault. **NOTE**:
-  this is addressed in `docs/kosmos/slurm-secrets.md`. **Resolved
-  2026-09-30:** a shared secrets file on teuwen-ansible (teuwen-sudoers),
-  read by `config/group_vars/slurm-cluster.yml` (deviation 30).
+- `slurm_password` / `slurm_db_password` are not in git. `group_vars` reads
+  a YAML file whose path is `KOSMOS_SLURM_SECRETS_FILE` (unset or
+  unreadable → play fails). See `docs/kosmos/slurm-secrets.md`. Role
+  defaults still contain the DeepOps placeholders; site group_vars overrides
+  them when the file is present (deviation 30).
 - Decisions, not defects: NHC runs with the role's default `nhc.conf`
   template (the example recommends a site `nhc_config_template`).
 - **Correction (2026-09-08): the monitoring server side is not inert.** An

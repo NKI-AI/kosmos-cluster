@@ -44,16 +44,15 @@ slurm_manage_gpus: true
 
 slurm_cluster_name: kosmos
 
-# kosmos: secrets from the shared file on teuwen-ansible (root:teuwen-sudoers,
-# 0640). /etc/profile.d/kosmos-slurm-secrets.sh exports its path as
+# kosmos: secrets are not in git. See docs/kosmos/slurm-secrets.md.
+# /etc/profile.d/kosmos-slurm-secrets.sh on teuwen-ansible exports
 # KOSMOS_SLURM_SECRETS_FILE at login; the file is YAML with slurm_password
-# and slurm_db_password. Read on the Ansible node only when a task needs
-# them; a run without the variable fails instead of using a placeholder.
-# slurm_password seeds the munge key (templates/etc/munge/munge.key.j2),
-# slurm_db_password is the slurmdbd MariaDB password.
-slurm_secrets_file: "{{ lookup('env', 'KOSMOS_SLURM_SECRETS_FILE') or undef(hint='KOSMOS_SLURM_SECRETS_FILE is not set: open a new login shell on teuwen-ansible (/etc/profile.d/kosmos-slurm-secrets.sh)') }}"
-slurm_password: "{{ (lookup('file', slurm_secrets_file) | from_yaml).slurm_password }}"
-slurm_db_password: "{{ (lookup('file', slurm_secrets_file) | from_yaml).slurm_db_password }}"
+# (seeds the munge key) and slurm_db_password (slurmdbd's MariaDB password).
+# Read on the Ansible node only when a task needs them. lookup('env') returns
+# "" for an unset variable, which mandatory lets through, hence the undef.
+kosmos_slurm_secrets_file: "{{ lookup('env', 'KOSMOS_SLURM_SECRETS_FILE') or undef(hint='KOSMOS_SLURM_SECRETS_FILE is not set: open a new login shell on teuwen-ansible (/etc/profile.d/kosmos-slurm-secrets.sh)') }}"
+slurm_password: "{{ (lookup('file', kosmos_slurm_secrets_file) | from_yaml).slurm_password | mandatory }}"
+slurm_db_password: "{{ (lookup('file', kosmos_slurm_secrets_file) | from_yaml).slurm_db_password | mandatory }}"
 
 slurm_default_job_timelimit: 60
 slurm_grace_time: 120  # time in seconds to allow for job cleanup
