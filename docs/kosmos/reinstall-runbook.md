@@ -184,7 +184,7 @@ to 23.02 other than the backups from step 1.
 
 ## What changed on purpose
 
-Deviations 23-32 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
+Deviations 23-34 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
 commits cherry-picked onto `reinstall-prep` (exporter restart and local
 build, retired Singularity wrapper, epilog/prolog fixes, NHC sshd match,
 pam_slurm_adopt guard, slurmd PATH).
