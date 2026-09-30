@@ -57,8 +57,10 @@ software_extra_packages:
   - vim
   - wget
   - build-essential
-  # kosmos: follows the HWE kernel (kernel.yml), not the GA 6.8 one
-  - linux-tools-generic-hwe-24.04
+  # kosmos: follows the HWE kernel (kernel.yml), not the GA 6.8 one. Only on
+  # the HWE release: 22.04 has no -hwe-24.04 package, and apt fails on an
+  # unknown name even in --check.
+  - "linux-tools-generic{{ ('-hwe-' ~ kernel_hwe_release) if (kernel_hwe | bool and ansible_distribution_version == kernel_hwe_release) else '' }}"
   - zsh
   - ncdu
   - nfs-common
