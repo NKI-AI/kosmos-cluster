@@ -209,10 +209,10 @@
   environment:
     PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
 
-# kosmos: QOS from site config (slurm_qos), before users/associations and
-# before slurmctld starts: partitions list them in AllowQos and
-# AccountingStorageEnforce includes qos. Add, then set the limits so they
-# converge when group_vars change.
+# kosmos: QOS from site config (slurm_qos), created before users/associations
+# and before slurmctld starts: partitions list them in AllowQos and
+# AccountingStorageEnforce includes qos. Their limits are set after slurmctld
+# has started (end of this file).
 - name: every QOS a partition allows is defined in slurm_qos
   vars:
     allowed_qos: >-
@@ -240,19 +240,6 @@
     'Nothing new added' not in create_qos_result.stdout and
     'Nothing added' not in create_qos_result.stdout and
     'Already existing' not in create_qos_result.stdout
-  run_once: true
-  environment:
-    PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
-
-- name: set QOS limits
-  command: >-
-    sacctmgr -i modify qos where name={{ item.key }} set
-    {% for k, v in item.value.items() %}{{ k }}={{ v }} {% endfor %}
-  loop: "{{ slurm_qos | default({}) | dict2items | selectattr('value') | list }}"
-  loop_control:
-    label: "{{ item.key }}"
-  register: modify_qos_result
-  changed_when: "'Nothing modified' not in modify_qos_result.stdout"
   run_once: true
   environment:
     PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
@@ -296,3 +283,34 @@
     state: restarted
     enabled: yes
     daemon-reload: yes
+
+# kosmos: QOS limits (slurm_qos). A new accounting database knows only the
+# built-in TRES; gres/gpu is added when slurmctld first starts with
+# AccountingStorageTRES=gres/gpu, and sacctmgr rejects a gres/gpu limit before
+# that. So wait for it after the restart above.
+- name: wait until slurmctld has registered the gres/gpu TRES
+  command: sacctmgr -nP show tres where type=gres name=gpu format=Type,Name
+  register: slurm_gpu_tres
+  until: "'gres|gpu' in slurm_gpu_tres.stdout"
+  retries: 30
+  delay: 5
+  changed_when: false
+  run_once: true
+  when: slurm_manage_gpus | bool
+  environment:
+    PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
+
+# sacctmgr prints "Modified qos" whenever the name matches, also when nothing
+# changed, so this cannot report changes: it reapplies the limits every run.
+# A limit taken out of slurm_qos is not cleared (set it to -1 instead).
+- name: set QOS limits
+  command: >-
+    sacctmgr -i modify qos where name={{ item.key }} set
+    {% for k, v in item.value.items() %}{{ k }}={{ v }} {% endfor %}
+  loop: "{{ slurm_qos | default({}) | dict2items | selectattr('value') | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  changed_when: false
+  run_once: true
+  environment:
+    PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
