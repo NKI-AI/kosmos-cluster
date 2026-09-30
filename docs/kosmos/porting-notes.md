@@ -35,6 +35,14 @@ atlas to the realm. Everything on
 `master` up to e812a659 has been ported, dropped with a row below, or
 superseded upstream.
 
+**Status (2026-09-30):** the maintenance from 2026-10-05 is a clean reinstall
+of the twelve hosts on Ubuntu 24.04.5 with the HWE 7.0 kernel and a fresh
+Slurm 26.05.4 install with a new accounting database, not an in-place
+upgrade. carlos, plato, mariecurie and schrodinger are gone. Branch
+`reinstall-prep` prepares for it (deviations 23-29, 25 upstream commits
+cherry-picked); the order of work is in `docs/kosmos/reinstall-runbook.md`.
+Check-run results below were taken on the 22.04 install and describe it.
+
 ## Before the first run
 
 Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
@@ -372,7 +380,12 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
   nothing, but it would hit nodes with running jobs. Task unchanged since
   23.08 and on master; someone rewrote the file by hand after
   provisioning. Fix deferred to the maintenance day, see "Maintenance day
-  2026-10-05" in section 2.
+  2026-10-05" in section 2. **Correction (2026-09-30):** gaia (a compute
+  node) boots with `cgroup_enable=memory swapaccount=1` and `iommu=pt` but
+  no `pci=realloc=off`, so the option is on the GPU nodes, not on all ten.
+  On the reinstall `playbooks/generic/kernel.yml` writes the command line
+  and the role's exact cgroup line (deviation 24), so the role's task finds
+  it and never reboots a node mid-play.
 - **Check-mode artifacts, not real changes:** thirty thousand of the log
   lines are the role "uninstalling" and preparing to rebuild hwloc, pmix
   and Slurm on all three hosts (remove build trees under
@@ -430,12 +443,12 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 3 | `roles/slurm/templates/etc/slurm/slurm.conf` | `KillWait=120` (upstream 26.07 value) | `KillWait=30` | 30 was the 23.08 default, not a site choice. Upstream raised it in Sept 2024 for more graceful job termination. Behavior change: jobs get 120 s instead of 30 s between SIGTERM and SIGKILL. Flip: set `KillWait=30` in the template | c9d86ffc |
 | 4 | `playbooks/slurm-cluster/slurm.yml` | keeps `roles: [facts]` in the first play, in addition to the fact-gathering pre_task | removed the role, keeps only the pre_task | The role installs the custom fact scripts (`topology`, `memory`, `gpus`) that slurm.conf needs. Master relies on other playbooks having installed them. On existing nodes the role is a no-op (scripts unchanged since 23.08). Flip: delete the `roles:` block | 00ae45d2 |
 | 5 | `roles/spack.environment`, `playbooks/slurm-cluster/spack-modules.yml`, `roles/spack/defaults/main.yml` | untouched upstream (no spack.environment role, upstream spack-modules.yml, upstream spack pin v1.2.0) | adds a role that installs Spack profile scripts on all hosts plus zsh support, a play for it in spack-modules.yml, and pins spack v0.20.2 with gcc/gfortran deps (EricMarcus-ai and joren, June 2024) | Spack was never rolled out: `/sw` (shared NFS) has no spack directory, no node has `/etc/profile.d/z00_spack.*`, `spack` is not on the path, and `slurm_install_spack` is `false` in config so the play never runs. Confirmed with the admin that nobody uses Spack. Flip: `git checkout master -- roles/spack.environment playbooks/slurm-cluster/spack-modules.yml` and set `spack_version`/`spack_ubuntu_deps` in group_vars (upstream already has gcc/gfortran) | (not applied, chunk 4d) |
-| 6 | `config/group_vars/slurm-cluster.yml` | `slurm_cluster_install_singularity: no` | `yes` | Apptainer replaced Singularity on the nodes (chunk 4c) and upstream's singularity playbook is broken in 26.07 (`abims_sbr.singularity` dropped from requirements). Flip: set `yes` (and expect the playbook to fail) | chunk 5b |
-| 7 | `config/group_vars/slurm-cluster.yml` | `slurm_version: "23.02.4"` pinned | no pin in config (master pinned it in `roles/slurm/defaults`) | Upstream 26.07 defaults to 26.05.1. Slurm supports upgrading at most two major versions at once, so 23.02 -> 26.05 must be stepped; a Slurm upgrade is a separate project. Flip: remove the pin | chunk 5b |
+| 6 | `config/group_vars/{all,slurm-cluster}.yml`, `config/host_vars/atlas` | no Singularity at all: upstream retired the Singularity wrapper (4572599d, cherry-picked 2026-09-30) and the site `slurm_cluster_install_singularity`, `singularity_conf_path`, `bind_paths` and golang variables went with it | `slurm_cluster_install_singularity: yes` | Apptainer replaced Singularity on the nodes (chunk 4c, deviation 22); upstream's playbook was already broken in 26.07. Flip: none (the playbook no longer exists upstream) | chunk 5b, 2026-09-30 |
+| 7 | `config/group_vars/slurm-cluster.yml` | `slurm_version: "26.05.4"` pinned, with `slurm_src_sha256` | no pin in config (master pinned 23.02.4 in `roles/slurm/defaults`) | Pinned 23.02.4 until 2026-09-30. The reinstall installs 26.05.4 fresh with a new accounting database (no stepped upgrade). A pin keeps a submodule bump from changing Slurm; upstream 26.07 defaults to 26.05.1 (master of upstream: 26.05.3). Flip: remove the pin and the checksum | chunk 5b, 2026-09-30 |
 | 8 | `config/group_vars/slurm-cluster.yml` | `slurm_default_group`, `slurm_organization_name`, `slurm_install_spack` removed | defines them | No role or playbook on either branch reads the first two; the third follows from deviation 5. Flip: re-add the lines | chunk 5b |
 | 9 | `config/group_vars/all.yml` | rebuilt from the 26.07 `config.example` with the four site values (DNS, timezone, extra packages, `deepops_dir`) | 23.08 example with the same four values | Master's file was otherwise untouched 23.08 example text; the 26.07 example adds the driver branch and open-kernel-module knobs and updates MAAS/NGC defaults. Flip: `git checkout master -- config/group_vars/all.yml` | chunk 5b |
 | 10 | `config/group_vars/all.yml` | `users: []` | example `users:` block defining an `nvidia` sudo user with a published password hash | Nothing in the Slurm flow runs the users role and no node has that user, but a sudo account with a public hash should not sit in site config. Flip: restore the block | chunk 5b |
-| 11 | `roles/requirements.yml`, `config/group_vars/all.yml` | upstream `nvidia.nvidia_driver v2.3.1`; one `nvidia_driver_branch: "580"` for every GPU node (the `"550"` pins in `config/host_vars/{alanturing,hamilton,roentgen}` were removed 2026-09-29 for the Ubuntu 26.04 reinstall) | `https://github.com/NKI-AI/ansible-role-nvidia-driver` (master), which is upstream v2.3.1 code with only the default branch changed from 515 to 550 | The fork adds nothing but a default. On 22.04 (2026-09-04) the nodes ran 580 (A6000, A100, H100) and 550 (the three Turing nodes), and the per-host pins kept a driver run from changing any node. On Ubuntu 26.04 only 580 and 595 are real server branches (535/550/570 are transitional to 580), 580 drives every remaining GPU, so the pins would have installed 580 anyway. Do not run `nvidia-driver.yml` from this state against the 22.04 nodes: it would move the Turing nodes to 580 and reboot them. See `docs/kosmos/gpu-inventory.md`. Flip: re-add the host_vars pins | 2026-09-29 |
+| 11 | `roles/requirements.yml`, `config/group_vars/all.yml` | upstream `nvidia.nvidia_driver v2.3.1`; one `nvidia_driver_branch: "580"` for every GPU node (the `"550"` pins in `config/host_vars/{alanturing,hamilton,roentgen}` were removed 2026-09-29 for the Ubuntu 26.04 reinstall) | `https://github.com/NKI-AI/ansible-role-nvidia-driver` (master), which is upstream v2.3.1 code with only the default branch changed from 515 to 550 | The fork adds nothing but a default. On 22.04 (2026-09-04) the nodes ran 580 (A6000, A100, H100) and 550 (the three Turing nodes), and the per-host pins kept a driver run from changing any node. On Ubuntu 26.04 only 580 and 595 are real server branches (535/550/570 are transitional to 580), 580 drives every remaining GPU, so the pins would have installed 580 anyway. Do not run `nvidia-driver.yml` from this state against the 22.04 nodes: it would move the Turing nodes to 580 and reboot them. The target became Ubuntu 24.04 (2026-09-30); noble-updates has the same 580.178.04. See `docs/kosmos/gpu-inventory.md`. Flip: re-add the host_vars pins | 2026-09-29 |
 
 | 12 | `playbooks/slurm-cluster/slurm.yml`, `config/group_vars/slurm-cluster.yml` | the "Add SSH public key to root user authorized keys" task runs only when `slurm_add_root_ssh_key` is true (site config: false) | upstream: unconditional (since 2020) | The play puts the running admin's `~/.ssh/id_rsa.pub` into root's `authorized_keys` on every compute node, and fails when that file does not exist. Neither is wanted here: no playbook logs in as root (Ansible connects as the admin over Kerberos and uses sudo), and the play's purpose, getting past pam_slurm_adopt, does not apply because the admin groups are in `/etc/localgroups`. Flip: set the variable to true and provide a key | chunk 7 |
 | 13 | `config/group_vars/all.yml` | pins `docker_version: '28.3'` and `docker_containerd_version: '1.6.32'` | no pin (the `docker_version` line is commented out), so whatever kubespray defaults to applies | The nine docker nodes run `docker-ce 5:26.1.2` and `containerd.io 1.6.28-2`, installed when the old kubespray defaulted to 26.1; without a pin the version silently follows every submodule bump. 28.3 / 1.6.32 are the 26.07 (kubespray 2.31) defaults. Chosen 2026-09-08 over pinning the running versions (26.1 and 1.6.28 are both still in kubespray's table) so the cluster sits on a supported release rather than the smallest diff. Consequence: the first real run upgrades docker-ce 26.1.2 -> 28.3.3 and containerd.io 1.6.28-2 -> 1.6.32-1 on nine nodes, restarting docker and the exporter containers, so it must run in a scheduled patch window, not on the live cluster. herakles needs `podman-docker` removed first. Note the docker role reads `docker_containerd_version`, not `containerd_version`. Flip: comment both lines out | (this change) |
@@ -444,10 +457,17 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 16 | `config/group_vars/slurm-cluster.yml`, `roles/slurm/templates/etc/slurm/slurm.conf` | emits `SlurmctldParameters=reconfig_on_restart` when `slurm_version` is 25.11 or newer; the site variable can be overridden to false | upstream omits the parameter | With the shared slurm.conf, a controller restart after a configuration change must also make every slurmd reread the file. Slurm added `reconfig_on_restart` in 25.11. The version guard leaves the current 23.02 configuration unchanged and the override supports disabling it during a rolling upgrade. It is transitional: once every Kosmos daemon is permanently on 26.05 or newer and support for older versions is dropped, set the site variable unconditionally to true and remove the version check. Flip: set `slurm_enable_reconfig_on_restart: false` | (this change) |
 | 17 | `roles/motd` | `00-header` template without the fifteen unused `tput` colour lines; new `files/50-sysinfo`, a shell replacement for landscape-sysinfo, installed 0755; `50-landscape-sysinfo` set to mode 0000 (through the symlink, onto the package wrapper) instead of deleted; the disable step is `find` + `file` with a keep-list (`motd_keep_executable`, default `91-contract-ua-esm-status`) | master: `find -type f -exec chmod 0000` command on every run (never idempotent, also disabled the ESM status script), header with colour lines, its own copy of the old landscape-sysinfo script (dropped 2026-09-08, see section 2, chunk 4b) | Login latency measured on kosmos 2026-09-16: header 0.07-0.25 s, landscape-sysinfo 0.45-0.55 s on most logins, both on every ssh login before the shell; the shell script gives the same block in 0.05 s. Flip: `git checkout master -- roles/motd` | pending |
 | 18 | `playbooks/nvidia-software/nvidia-driver.yml`, `playbooks/nvidia-software/tasks/nvidia-fabricmanager.yml` | on nodes with NVSwitch chips (`gpus.nvswitch_count > 0`: herakles) installs `nvidia-fabricmanager-<branch>` pinned to the installed driver's upstream version, enables the service and waits until `nvidia-smi -q` shows every GPU's fabric `Completed`/`Success` | upstream: fabric manager only in `roles/nvidia-dgx` (DGX OS); master: none, herakles was set up by hand | An HGX system without a fabric manager at the driver's exact version has no working CUDA ("system not yet initialized"); after a clean install nothing else would install it. Ubuntu publishes driver and fabric manager at the same version string. Flip: delete the include | 2026-09-29 |
-| 19 | `config/group_vars/all.yml` | `dcgm_pkg_name: datacenter-gpu-manager-4-cuda13` (derived from `nvidia_driver_branch`: 13 for 580 and newer, else 12) | role default `datacenter-gpu-manager` (DCGM 3) | NVIDIA's ubuntu2604 repository carries only DCGM 4. On the 22.04 nodes DCGM 3.3.6 is held, so the switch only happens on the reinstall. Flip: delete the line | 2026-09-29 |
+| 19 | `config/group_vars/all.yml` | `dcgm_pkg_name: datacenter-gpu-manager-4-cuda13` (derived from `nvidia_driver_branch`: 13 for 580 and newer, else 12) | role default `datacenter-gpu-manager` (DCGM 3) | Chosen for Ubuntu 26.04, whose NVIDIA repository carries only DCGM 4; kept for 24.04, where the ubuntu2404 repository has DCGM 4.7 (checked 2026-09-30). On the 22.04 nodes DCGM 3.3.6 is held, so the switch only happens on the reinstall. Flip: delete the line | 2026-09-29 |
 | 20 | `roles/facts/files/gpus.fact`, `playbooks/nvidia-software/nvidia-driver.yml`, `config/group_vars/all.yml` | the `gpus` fact adds `pci_ids` (vendor:device of the NVIDIA display controllers) and `nvswitch_count`, both from `lspci -n` (`count` unchanged); the driver playbook refuses a GPU missing from `nvidia_gpu_architectures`, or a legacy architecture (Maxwell, Pascal, Volta) with a branch above 580 or the open kernel modules | `gpus` reports only `count` (by `lspci` name match); no check | Drivers are chosen per architecture and the choice has to be made before a driver exists on a freshly installed node, so it cannot come from `nvidia-smi`; `lspci` names are not reliable (22.04 does not know the H100). Tested 2026-09-29 on six node types: same `count` as the old script. Flip: `git checkout master -- roles/facts/files/gpus.fact` and delete the assert | 2026-09-29 |
 | 21 | `roles/slurm/templates/etc/slurm/gres.conf`, `config/group_vars/slurm-cluster.yml` | `gres.conf` is `AutoDetect=nvidia` when `slurm_version` is 24.11 or newer (`slurm_gres_autodetect`); below that the generated per-GPU lines are unchanged; the `gpu_topology` host_vars of carlos, plato and schrodinger are deleted | one `Name=gpu File=/dev/nvidiaN Cores=<local_cpulist>` line per GPU from the topology fact, or `AutoDetect=nvml` (which installs CUDA on every Slurm host and builds against NVML) | The generated `Cores=` lists are Linux CPU thread ids (e.g. `0-9,20-29` on a 20-core node); Slurm rejects any list containing an id at or above the core count ("invalid GRES core specification", `bit_unfmt`), so no node had GPU-CPU affinity (survey 2026-09-30, `docs/kosmos/gpu-inventory.md`). The fact also assumes `/dev/nvidiaN` follows PCI order, which is false on six nodes, and aristarchus carried a hand-edited file with two GPUs on the wrong socket. AutoDetect=nvidia (Slurm 24.11+) reads the driver's device minors and converts `local_cpulist` to Slurm core ids, without NVML; it detects no NVLinks. An untyped `Gres=gpu:N` in slurm.conf still matches (the detected type is dropped). The driver must be loaded before slurmd starts. Flip: set `slurm_gres_autodetect: ""` | 2026-09-30 |
 | 22 | `roles/apptainer`, `playbooks/container/apptainer.yml`, `playbooks/slurm-cluster.yml`, `config/group_vars/slurm-cluster.yml` | Apptainer 1.5.4 pinned in site config with the release .deb's sha256; the role checksums the download (also in check mode) and installs with `allow_downgrade`; `slurm-cluster.yml` runs it on `slurm-node` behind `slurm_cluster_install_apptainer`; the playbook's default hostlist is `slurm-node` | role default 1.3.3, no checksum, fails on nodes with a newer version; playbook run by hand, default hostlist `all` | Versions had drifted (1.3.3 on eight nodes, 1.4.0 on gaia, 1.5.3 from the PPA on aristarchus), so a container job could behave differently per node, and the role could not bring the two newer nodes back. 1.5.4 (2026-09-22) is the latest release and fixes a high-severity privilege escalation in 1.5.x suid mode. The login node stays without Apptainer for now (team to confirm). Flip: `slurm_cluster_install_apptainer: no` | 2026-09-30 |
+| 23 | `roles/slurm/templates/etc/slurm/{slurm,cgroup}.conf`, `roles/slurm/tasks/build.yml`, `roles/slurm/defaults/main.yml`, `config/group_vars/slurm-cluster.yml` | for 26.05: `PriorityType=priority/basic`; no `AccountingStorageUser`, `CgroupAutomount`, `SwitchType=switch/none`, `JobCompType=jobcomp/none` or JobCredential comments; the tarball is downloaded with `get_url` and checked against `slurm_src_sha256` before unpacking; `hwloc_version: 2.12.2` | upstream: the five lines, unpack straight from the URL with no checksum, hwloc 2.5.0 | The default PriorityType became multifactor in 23.11; basic keeps the FIFO scheduling the cluster had. `AccountingStorageUser` is defunct since 25.11 and `CgroupAutomount` is a cgroup v1 option (24.04 runs v2); the other two are the defaults. hwloc 2.5.0-2.7.0 makes slurmd segfault (SchedMD); 2.12.2 is the latest bugfix release of the 2.12 line. Ported from `slurm-upgrade-fixes` without its upgrade playbook. Flip: revert the template lines; `slurm_src_sha256: ""`; drop `hwloc_version` | 2026-09-30 |
+| 24 | `playbooks/generic/kernel.yml` (new), `playbooks/slurm-cluster.yml`, `config/group_vars/all.yml` (`kernel_*`, `software_extra_packages`) | installs `linux-generic-hwe-24.04` and its headers; writes `GRUB_CMDLINE_LINUX` (`pci=realloc=off` on nodes whose `gpus` fact is non-zero, plus `kernel_cmdline_extra`) and on slurm-node the Slurm role's exact cgroup line; one reboot only when grub changed or a newer kernel is installed; imported by `slurm-cluster.yml` after chrony, before the driver; `linux-tools-generic-hwe-24.04` instead of `linux-tools-generic` | nothing manages the kernel; the GPU nodes' grub was edited by hand; the Slurm role reboots each node the first time it adds its line | Admins wanted a newer kernel for the hardware: the HWE stack (7.0 from 24.04.5, signed, security updates) instead of mainline builds. DKMS needs headers for the running kernel. `pci=realloc=off` stops the kernel's automatic PCI reallocation (triggered by unassigned SR-IOV BARs) from leaving a GPU without its large BAR; the GPU nodes carried it on 22.04. Writing the cgroup line here keeps the role's grub task from rebooting nodes in the middle of the Slurm play. Flip: `kernel_manage: false` | 2026-09-30 |
+| 25 | `roles/nvidia_dcgm/tasks/main.yml` | `ansible_product_name \| default('')` in the DGX check | `ansible_product_name is search("DGX")` | `ansible_product_name` is a hardware fact; site config gathers only the `min` subset, so on a freshly installed node (empty fact cache) it is undefined and the role fails. Flip: remove the default | 2026-09-30 |
+| 26 | `roles/facts/tasks/gather-slurm-nodes.yml`, `roles/slurm/templates/etc/slurm/slurm.conf` | an unreachable slurm-node does not stop atlas's play (`slurm_nodes_unreachable`); slurm.conf lists only nodes that were reached and have the custom facts, and partitions only with those nodes | one unreachable node aborts the controller play; a node without facts fails the render | During the reinstall nodes come back one by one; a node joins slurm.conf on the first `slurm-cluster.yml -l atlas,<node>` run. `delegate_facts` on a loop keeps nothing once any item is unreachable (ansible-core 2.17), hence the explicit set_fact. With every node reachable the rendered file is byte-identical. Flip: `git checkout <before> -- roles/facts/tasks/gather-slurm-nodes.yml` and the template loop | 2026-09-30 |
+| 27 | `roles/slurm/tasks/controller.yml`, `roles/slurm/defaults/main.yml` | writes `/etc/mysql/mariadb.conf.d/99-slurmdbd.cnf` (InnoDB buffer pool 25 % of RAM up to 4 GiB, log file a quarter of it, `innodb_lock_wait_timeout=900`, `max_allowed_packet=16M`, `innodb_snapshot_isolation=OFF`) and restarts MariaDB before the slurm DB user is created | MariaDB defaults | SchedMD's recommendations for slurmdbd; `innodb_snapshot_isolation` (MariaDB >= 10.6.18) causes rollbacks slurmdbd cannot recover from. Moved from the upgrade playbook into the normal deploy. Flip: `slurm_mariadb_tune: false` | 2026-09-30 |
+| 28 | `roles/slurm/tasks/controller.yml`, `config/group_vars/slurm-cluster.yml` (`slurm_qos`) | creates every QOS in `slurm_qos` and sets its limits (`sacctmgr modify qos`); asserts that every name in a partition's `slurm_allow_qos` is defined | only the cluster, `compute-account` and the running admin are created; QOS were made by hand | Partitions allow only these QOS and `AccountingStorageEnforce` includes qos, so on a fresh database jobs could not run and `sacctmgr load` of the old associations would fail without them. Flip: `slurm_qos: {}` and drop the tasks | 2026-09-30 |
+| 29 | `config/group_vars/slurm-cluster.yml` | `slurm_exporter_build_dir: "{{ deepops_dir }}/build/slurm-exporter"` | upstream role default `/opt/deepops/build/slurm-exporter` | The DeepOps-owned exporter (upstream 7393884e, 59fa7a00, cherry-picked) builds its image locally; every other build directory derives from `deepops_dir`. Flip: delete the line | 2026-09-30 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -519,69 +539,15 @@ issues were removed; corrections are marked "corrected 2026-09-08".
 
 ### Maintenance day 2026-10-05
 
-Decided 2026-09-08: no playbook run or hand edit that changes live node
-configuration before the maintenance day, on which the branch goes live
-and Slurm is upgraded. Everything below waits for that day; until then only
-`--check --diff` runs and branch/doc work. Order matters.
-
-1. **Fix `/etc/default/grub` on all ten compute nodes so the Slurm role
-   finds its line and stops rebooting nodes.** Today each node has
-   `GRUB_CMDLINE_LINUX="pci=realloc=off cgroup_enable=memory swapaccount=1"`
-   twice (hand-written, expanded form). Replace both lines with
-   ```
-   GRUB_CMDLINE_LINUX="pci=realloc=off"
-   GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX} cgroup_enable=memory swapaccount=1"
-   ```
-   (second line verbatim: it is the `lineinfile` string in
-   `roles/slurm/tasks/compute.yml`), then `update-grub`. The effective
-   kernel command line is unchanged, so no reboot is needed for this step
-   itself; the nodes reboot anyway that day. Before editing, confirm the
-   exact current lines on every node (`grep GRUB_CMDLINE_LINUX
-   /etc/default/grub`; only the cgroup option count was checked so far)
-   and that `/proc/cmdline` shows the same options. Verify afterwards with
-   `ansible-playbook -kK --check --diff --limit slurm-node
-   playbooks/slurm-cluster/slurm.yml`: the "add cgroups to grub options"
-   task must report ok on every node. Plan: a one-off play in
-   `docs/kosmos/` (replace the two lines, `update-grub`, show the grub.cfg
-   diff), run in check mode first. Alternative rejected: a site variable
-   that skips the grub tasks would also skip them on future new nodes.
-2. **Vault password and munge key rollout** per
-   `docs/kosmos/slurm-secrets-vault.md`: all twelve hosts in one
-   `slurm.yml` run from env-26.07, check run first, then `sinfo` and a
-   munge round trip from atlas. This is the first real run of `slurm.yml`
-   from the branch; expect the changes listed under "Check-run results",
-   2026-09-08 (herakles first-run items, kosmos dev packages, slurmctld,
-   slurmdbd and slurmd restarts).
-3. **Slurm upgrade** (23.02 -> stepped; branch `slurm-upgrade-26.04` on
-   origin), after the branch is live.
-4. Other items that touch live nodes and are waiting for this day:
-   herakles driver metapackages and reboot (Check-run results,
-   2026-09-04); podman-docker vs docker-ce on herakles and the docker
-   upgrade on gaia and eudoxus (5b); the first run of `apptainer.yml`
-   (1.5.4 on every compute node, deviation 22);
-   nofile limit on gaia (facts gathering); the first real run of
-   `nvtop.yml`, which rebuilds nvtop 3.3.2 on the nine GPU nodes
-   (deviation 15); the first real run of `motd.yml` after deviation 17
-   (installs `50-sysinfo`, disables landscape-sysinfo and the colour lines
-   in `00-header` on every host, also atlas; verify with one ssh login per
-   node type: banner once, sysinfo block once); the first full run of
-   `playbooks/slurm-cluster.yml`.
-- **Ansible node access, not blocking:** atlas has no Kerberos host
-  principal, so any `slurm.yml` run that includes atlas still needs `-k`.
-  Join it to the realm
-  (see "Running playbooks from teuwen-ansible").
-- **Decide before the first full run of `playbooks/slurm-cluster.yml`:**
-  the monitoring section installs docker-ce on every host, which fails on
-  herakles (podman-docker) and upgrades docker on gaia and eudoxus (5b);
-  the inline `hostlist=` on three `import_playbook` lines is ignored, so
-  NHC and DCGM also targeted atlas and kosmos (4e, fixed); the apptainer role failed
-  on gaia and aristarchus, which run newer versions than the pin (4c; fixed,
-  deviation 22: it now downgrades).
-- **Should be fixed soon:** Slurm passwords are the upstream placeholders (5b);
-  (Fixed on this branch: the dead per-host overrides in host_vars, 5a,
-  deviation 14; the unpinned nvtop build, 4b, deviation 15; fact
-  gathering from `groups['all']`, see Facts gathering.)
-- **Cleanup when convenient:** everything else below.
+Superseded 2026-09-30: the maintenance is a clean reinstall on Ubuntu 24.04
+with a fresh Slurm 26.05.4, so the in-place steps planned here (the
+one-off grub fix, the vault/munge rollout onto running nodes, the stepped
+23.02 -> 24.11 -> 26.05 upgrade, the docker upgrade on gaia and eudoxus,
+podman-docker on herakles) no longer apply. The order of work is in
+`docs/kosmos/reinstall-runbook.md`. What remains of the items in this
+section: the vault (shared vault on teuwen-ansible, another admin), atlas's
+Kerberos host principal (not a priority), and the first full run of
+`playbooks/slurm-cluster.yml`, now on freshly installed nodes.
 
 ### Slurm role (commit c9d86ffc)
 
@@ -914,8 +880,10 @@ area has several leftovers that need a decision (update or remove).
     nodes back in line.
 - `slurm_password` / `slurm_db_password` are still the upstream placeholder
   strings, on master and here. They should live in an Ansible vault. **NOTE**:
-  this is addressed in `docs/kosmos/slurm-secrets-vaults.md`. Passwords
-  should be stored in a vault which all admins have access to.
+  this is addressed in `docs/kosmos/slurm-secrets-vault.md`. Passwords
+  should be stored in a vault which all admins have access to (2026-09-30:
+  a shared vault on teuwen-ansible is being set up by another admin; the
+  first real run on the reinstalled cluster needs it).
 - Decisions, not defects: NHC runs with the role's default `nhc.conf`
   template (the example recommends a site `nhc_config_template`).
 - **Correction (2026-09-08): the monitoring server side is not inert.** An
