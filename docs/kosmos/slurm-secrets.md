@@ -72,5 +72,6 @@ nothing on atlas.
 - The Slurm role's password hash depends on the Ansible/passlib version
   (porting-notes, check-run results 2026-09-08): hosts must be deployed from
   the same environment (env-26.07), or their munge keys differ.
-- Do not run `slurm.yml` against the 22.04 cluster: the first real use is
+- Do not run `slurm.yml` for real against the 22.04 cluster (`--check`
+  is fine): the first real use is
   the reinstall, where every host gets the new key on its first run.
