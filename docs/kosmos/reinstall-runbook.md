@@ -235,7 +235,7 @@ series installed. Drain first when changing `kernel_cmdline_*`.
 
 ## What changed on purpose
 
-Deviations 23-35 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
+Deviations 23-36 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
 commits cherry-picked onto `reinstall-prep` (exporter restart and local
 build, retired Singularity wrapper, epilog/prolog fixes, NHC sshd match,
 pam_slurm_adopt guard, slurmd PATH).

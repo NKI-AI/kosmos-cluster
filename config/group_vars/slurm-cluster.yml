@@ -319,7 +319,7 @@ openmpi_configure: "./configure --prefix={{ openmpi_install_prefix }} --disable-
 # Open OnDemand                                                                #
 ################################################################################
 install_open_ondemand: no
-# OOD Linux-host adapter requires `slurm_cluster_install_singularity` to be true
+# OOD Linux-host adapter needs a container runtime on the nodes (Apptainer here)
 ood_install_linuxhost_adapter: no
 
 servername: '{{ ansible_fqdn }}'

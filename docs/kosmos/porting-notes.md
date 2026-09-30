@@ -39,7 +39,7 @@ superseded upstream.
 of the twelve hosts on Ubuntu 24.04.5 with the HWE 7.0 kernel and a fresh
 Slurm 26.05.4 install with a new accounting database, not an in-place
 upgrade. carlos, plato, mariecurie and schrodinger are gone. Branch
-`reinstall-prep` prepares for it (deviations 23-35, 25 upstream commits
+`reinstall-prep` prepares for it (deviations 23-36, 25 upstream commits
 cherry-picked); the order of work is in `docs/kosmos/reinstall-runbook.md`.
 Check-run results below were taken on the 22.04 install and describe it.
 
@@ -476,6 +476,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 33 | `roles/slurm/tasks/munge.yml`, `roles/slurm/tasks/controller.yml` | `diff: false` on the munge key and `slurmdbd.conf` templates | upstream: both show their content in `--diff` | The munge key is derived from `slurm_password` and `slurmdbd.conf` holds `slurm_db_password` (`StoragePass`): a `--check --diff` run piped to `tee` wrote both to a log file. Flip: remove the two lines | 2026-09-30 |
 | 34 | `roles/prometheus-slurm-exporter/templates/docker.slurm-exporter.service.j2`, `config/group_vars/slurm-cluster.yml` (`slurmctl_config_dir`) | the exporter container also mounts `slurmctl_config_dir` (`/sw/.slurm`) read-only when it is not `/etc/slurm` | upstream mounts only `/etc/slurm` | On atlas `/etc/slurm/slurm.conf` is a symlink into `/sw/.slurm` (`slurm_conf_symlink`), which dangled inside the container: every scrape failed (`slurm_exporter_collector_errors`) with no Slurm metrics, also on master. Flip: remove the conditional mount | 2026-09-30 |
 | 35 | `roles/slurm/tasks/build.yml`, `roles/slurm/templates/etc/slurm/slurmdbd.conf` | the Slurm tarball is not unpacked in check mode; the recursive `deepops_dir` chmod and the Slurm exporter restart run only after a Slurm build; `PidFile=/var/run/slurmdbd/slurmdbd.pid` | upstream: unpack also in check mode (from the URL it worked; from the downloaded file, which check mode does not write, it fails); chmod and exporter restart on every run; `/var/run/slurmdbd.pid` | The dry run against the live cluster stopped in the build on every host. The chmod flipped the exporter's build context to 0755 on every run, which rebuilt and restarted the exporter each time, so no run converged. The 26.05 unit runs slurmdbd as `slurm` with `RuntimeDirectory=slurmdbd`: it cannot write `/var/run/slurmdbd.pid` (error in the log, not fatal). Flip: revert the three changes | 2026-09-30 |
+| 36 | `roles/slurm/templates/etc/slurm/epilog.d/41-lastuserjob-ssh`, `prolog.d/50-exclusive-ssh` | match the job user against `localusers` as an exact whole line (`grep -qxF`, `awk '$0 != u'`), rewriting `/etc/localusers` in place | upstream: `grep -w` and `sed "/<user>/d"`, i.e. regex and substring matches | After a user's last job, 41 deleted every line containing the name: a job user `ro` removed `root`, a user `a` every line with an a. Upstream fixed the same pattern in epilog 40 and 42 (cherry-picked) but not here. Flip: `git checkout origin/deepops-26.07 -- <the two files>` | 2026-09-30 |
 
 ### Master changes not carried over (superseded upstream)
 
