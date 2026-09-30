@@ -205,11 +205,14 @@ slurm_cluster_install_apptainer: yes
 apptainer_version: "1.5.4"
 apptainer_sha256: "281cf9bd68f16b6f7c34a3a94d77668bc327b9c09db0412ce7890162734a97f7"
 # kosmos: nodestat (roles/nodestat) on slurm-node and slurm-login. Pinned to
-# a commit of github.com/edupooch/nodestat; the checksum is the sha256 of
-# nodestat.py at that commit. 0.16 (2026-07-14).
+# a commit; the checksum is the sha256 of nodestat.py at that commit. 0.16
+# plus our fixes (array jobs, -g, node states), from branch
+# fix-array-jobs-gres-used of our fork until edupooch/nodestat merges the
+# pull request; then drop nodestat_repo and pin the upstream commit.
 slurm_cluster_install_nodestat: yes
-nodestat_version: "4bf9b5f37ae83e9949966f1beee618e048aff728"
-nodestat_sha256: "faf5dffb7a3e338724439c110d82ba0ddfedd54b52f2f19ba0727ea95defeee1"
+nodestat_repo: "kosmasgal/nodestat"
+nodestat_version: "487972f97bcea8499fb72dc339c80bba13f85490"
+nodestat_sha256: "9686ac2bb7c7a577e54d38cd1bf603617d5c70bb7a9ca6ab668ca4448d0e2a7d"
 
 ################################################################################
 # NFS                                                                          #
