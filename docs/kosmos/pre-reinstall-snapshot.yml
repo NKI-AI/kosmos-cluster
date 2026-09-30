@@ -1,0 +1,100 @@
+---
+# One-off, before IT wipes the hosts (maintenance from 2026-10-05): copy what a
+# clean install loses to the Ansible node, so the reinstalled nodes can be
+# compared with the old ones and nothing hand-made is lost silently.
+#
+#   ansible-playbook -K docs/kosmos/pre-reinstall-snapshot.yml
+#   ansible-playbook -K docs/kosmos/pre-reinstall-snapshot.yml -l atlas -e snapshot_prometheus=true
+#
+# Read-only on the hosts except a scratch directory under /var/tmp, which is
+# removed at the end. Output: ~/reinstall-snapshot/<host>/ on the Ansible node
+# (mode 0700). Per host: /etc as a tarball (without shadow, gshadow, the
+# Kerberos keytab and the ssh host private keys), the kernel command line,
+# package selections and holds, disks, mounts, enabled units, root's crontab,
+# nvidia-smi -q on GPU nodes. On the controller also: Slurm and MariaDB logs,
+# the rsyslog tree of the compute nodes, Grafana's data, and with
+# snapshot_prometheus=true the Prometheus volume (can be large).
+#
+# The Slurm database itself is dumped by playbooks/slurm-cluster/slurm-backup.yml
+# (branch slurm-upgrade-fixes), see docs/kosmos/reinstall-runbook.md step B2.
+- hosts: "{{ hostlist | default('slurm-cluster') }}"
+  become: true
+  gather_facts: false
+  vars:
+    snapshot_remote: /var/tmp/reinstall-snapshot
+    snapshot_local: "{{ lookup('env', 'HOME') }}/reinstall-snapshot"
+    snapshot_prometheus: false
+    snapshot_files:
+      - etc.tar.gz
+      - info.txt
+      - dpkg-selections.txt
+      - nvidia-smi-q.txt
+  tasks:
+    - name: create the scratch directory
+      file:
+        path: "{{ snapshot_remote }}"
+        state: directory
+        mode: "0700"
+
+    - name: collect host state
+      shell: |
+        set -u
+        cd {{ snapshot_remote }}
+        tar -czf etc.tar.gz --ignore-failed-read \
+            --exclude=etc/shadow --exclude=etc/shadow- \
+            --exclude=etc/gshadow --exclude=etc/gshadow- \
+            --exclude=etc/krb5.keytab --exclude='etc/ssh/ssh_host_*_key' \
+            -C / etc 2>/dev/null || true
+        dpkg --get-selections > dpkg-selections.txt
+        {
+          for c in "uname -a" "cat /etc/os-release" "cat /proc/cmdline" \
+                   "grep -n GRUB_CMDLINE /etc/default/grub" "apt-mark showhold" \
+                   "lsblk -f" "findmnt -l" "df -hT -x tmpfs -x devtmpfs" \
+                   "ip -br addr" "systemctl list-unit-files --state=enabled --no-pager" \
+                   "crontab -l -u root" "mokutil --sb-state" "lspci -nn -d 10de:"; do
+            echo "### $c"; timeout 60 $c 2>&1; echo
+          done
+        } > info.txt
+        if command -v nvidia-smi >/dev/null; then timeout 120 nvidia-smi -q > nvidia-smi-q.txt 2>&1; else : > nvidia-smi-q.txt; fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: collect controller data
+      shell: |
+        set -u
+        cd {{ snapshot_remote }}
+        tar -czf controller-logs.tar.gz --ignore-failed-read \
+            /var/log/slurm /var/log/mysql /var/log/deepops-hosts 2>/dev/null || true
+        tar -czf grafana.tar.gz --ignore-failed-read /var/lib/grafana 2>/dev/null || true
+        {% if snapshot_prometheus | bool %}
+        docker run --rm -v deepops_prometheus_metrics:/prometheus:ro -v {{ snapshot_remote }}:/out \
+            busybox tar -czf /out/prometheus.tar.gz -C / prometheus
+        {% endif %}
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: inventory_hostname in groups['slurm-master']
+
+    - name: create the local directory
+      file:
+        path: "{{ snapshot_local }}/{{ inventory_hostname }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+
+    - name: fetch the files
+      fetch:
+        src: "{{ snapshot_remote }}/{{ item }}"
+        dest: "{{ snapshot_local }}/{{ inventory_hostname }}/"
+        flat: true
+      loop: >-
+        {{ snapshot_files + (['controller-logs.tar.gz', 'grafana.tar.gz']
+           + (['prometheus.tar.gz'] if snapshot_prometheus | bool else [])
+           if inventory_hostname in groups['slurm-master'] else []) }}
+
+    - name: remove the scratch directory
+      file:
+        path: "{{ snapshot_remote }}"
+        state: absent
