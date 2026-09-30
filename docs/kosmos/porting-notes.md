@@ -426,6 +426,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 0d | `ansible.cfg` | `/var/tmp/ansible_cache` (same as upstream; per-user `~/.ansible/fact_cache` from 2026-09-08 reverted 2026-09-30) | `/var/tmp/ansible_cache` | On 2026-09-08 the directory was `root:teu-ansible` mode 0700, which disabled the jsonfile cache for every admin. It is now `770` `root:teuwen-sudoers` (checked 2026-09-30). Flush with `--flush-cache` after an OS reinstall so 22.04 facts are not reused for a day. | 2026-09-30 |
 | 0c | `ansible.cfg` | no `control_path` override: ssh control sockets go to Ansible's default `~/.ansible/cp`, which Ansible creates itself | upstream (since the 2018 initial commit, no reason given): `control_path = ~/.ssh/ansible-%%r@%%h:%%p` | With the upstream setting Ansible fails on a fresh account until `~/.ssh` exists, and nothing creates it (`UserKnownHostsFile=/dev/null` in the same file means ssh never writes `known_hosts` there either). Bit kosmas-ans on 2026-09-03. Where the sockets live makes no functional difference. Flip: restore the line and `mkdir -m 700 ~/.ssh` | chunk 7 |
 | 0e | `ansible.cfg` | `interpreter_python = /usr/bin/python3` | upstream (Adam Tetelman, 2021-12-10) and master: `ansible_python_interpreter = /usr/bin/python3` under `[defaults]` | The upstream line is a no-op: `ansible_python_interpreter` is an inventory variable, not an ansible.cfg key, so Ansible ignored it (`ansible-config dump` showed `INTERPRETER_PYTHON` at its default `auto`) and fell back to discovery, printing the "discovered Python interpreter at /usr/bin/python3.10 ... future installation of another Python interpreter could change the meaning of that path" warning for every host. `interpreter_python` is the real key. Verified 2026-09-08: all ten compute nodes resolve `/usr/bin/python3` to python3.10, and an ad-hoc ping of hamilton no longer warns. Flip: restore the old line (and the warning) | 2026-09-08 |
+| 0f | `ansible.cfg` | `gather_subset = min` | unset (Ansible default `all`) | Cache-miss implicit gather ran `all` (gaia udevadm / Errno 24). `min` covers pkg/OS; GPU/CPU/memory are `ansible_local`. Explicit `setup:` and ad-hoc `-m setup` still default to `all` unless the task/module args say otherwise. Flip: delete the line | 2026-09-30 |
 | 1 | `scripts/setup.sh` | venv default `/opt/kosmos-cluster/env` | venv in `./env` (upstream default) | Shared venv on teuwen-ansible, one Ansible for all admins; clones are per admin (decided 2026-09-08, see "Setup decision") | b084b7f1 |
 | 1b | `.github/workflows/setup.yml` | activates `/opt/kosmos-cluster/env` | upstream activates `/opt/deepops/env` (master still has the 23.08 workflows) | Follows deviation 1; the CI job failed on every push until the path matched. Flip together with deviation 1 | chunk 6 |
 | 2 | `roles/{slurm,nhc,nvidia-dcgm-exporter,nginx-docker-registry-cache,standalone-container-registry,pyxis}/defaults/main.yml` | untouched upstream files | overrides build/config paths to `/opt/kosmos-cluster/...`, `slurm_cluster_name: kosmos`, `standalone_container_registry_name: kosmos-registry`, `slurm_pyxis_version: 0.19.0` | Site values belong in `config/group_vars`, not in vendored roles. All of them are now set in `config/group_vars/{all,slurm-cluster}.yml`, derived from `deepops_dir` | c9d86ffc, chunk 5b |
@@ -602,8 +603,8 @@ and Slurm is upgraded. Everything below waits for that day; until then only
   pre_task that `setup`s every member of `groups['all']` when
   `ansible_default_ipv4` was missing (so `--limit` still SSHes to atlas and
   kosmos, and a bare `setup:` still ran the mount collector on gaia).
-  **Fixed:** first play is `hosts: slurm-node` with implicit `min` gather
-  and `roles: [facts]`. Before rendering slurm.conf, the play that owns the
+  **Fixed:** first play is `hosts: slurm-node` with `roles: [facts]`.
+  Before rendering slurm.conf, the play that owns the
   template then runs `setup`/`local` over `groups['slurm-node']`
   (`roles/facts/tasks/gather-slurm-nodes.yml`) because the template walks
   every compute node. With `slurm_conf_symlink: true`, that is the controller
@@ -615,17 +616,17 @@ and Slurm is upgraded. Everything below waits for that day; until then only
   whole cluster nor renders slurm.conf. Login is not a facts target.
   `docs/kosmos/render-slurm-conf.yml` stays a helper and is not part of
   deploy.
-- Implicit gather `min` is `ansible_gather_subset` in
-  `config/group_vars/slurm-cluster.yml`. Site facts stay in `ansible_local`
-  via `roles/facts` (always refresh on the slurm.conf path, not the 24 h
-  cache). The role's post-copy `setup` uses `!all`/`!min`/`local`, same as
-  `gather-slurm-nodes.yml`. `memory.fact` reports integer `memtotal_mb` and
-  `total_mb` (95% of MemTotal). `topology.fact` lists GPUs by the same PCI
-  classes as `gpus.fact`. Hardware/network only if a play needs them. NHC
-  `nhc.conf.j2` uses `memtotal_mb` for the physmem window and no longer
-  loops `ansible_interfaces`.
-  `create_mounts.yml` does not gather facts because its role does not consume
-  any.
+- Implicit gather is `gather_subset = min` in `ansible.cfg`. Group_vars
+  `ansible_gather_subset` does not override a cache-miss gather of `all`.
+  Site facts stay in `ansible_local` via `roles/facts` (always refresh on
+  the slurm.conf path, not the 24 h cache). Explicit `setup:` still
+  defaults to `all`; the role's post-copy task uses `!all`/`!min`/`local`,
+  same as `gather-slurm-nodes.yml`. `memory.fact` reports integer
+  `memtotal_mb` and `total_mb` (95% of MemTotal). `topology.fact` lists
+  GPUs by the same PCI classes as `gpus.fact`. NHC `nhc.conf.j2` uses
+  `memtotal_mb` for the physmem window and no longer loops
+  `ansible_interfaces`. `create_mounts.yml` does not gather facts because
+  its role does not consume any.
 
 ### NFS mounts (chunk 4a)
 
@@ -790,20 +791,14 @@ area has several leftovers that need a decision (update or remove).
   (`ansible_local`). NHC `check_hw_physmem` uses
   `ansible_local.memory.memtotal_mb` (±5% of MemTotal) and the
   commented `check_hw_eth` loop is gone.
-- Fix options: (a) `ansible_gather_subset: [min]` on `slurm-cluster` so
-  implicit gather never runs the mount collector (see Facts gathering);
-  **done** in group_vars. (b) raise the soft `nofile` limit for login
-  sessions, e.g. `/etc/security/limits.d/90-nofile.conf` with
-  `* soft nofile 65536` (hard limit is already 1048576; new ssh sessions
-  only, so let Ansible's 5-minute control sockets expire first). (b) is
-  still needed for unfiltered `setup` and ad-hoc `-m setup`. Nothing in
-  the repo manages limits today.
-- With (a) in place, `--check` on gaia should get past fact gathering for
-  playbooks that only implicit-gather. `slurm.yml` no longer uses a bare
-  `setup:` over `groups['all']`; its slurm.conf path gathers `local` only.
-  A failure that still mentions `udevadm` / `Errno 24` is an explicit
-  `setup` without `min`/`local` (or a stale full fact cache); `--flush-cache`
-  once if the cache predates the subset.
+- Fix: `gather_subset = min` in `ansible.cfg` (see Facts gathering).
+  Explicit `setup:` still defaults to `all` unless the task passes
+  `gather_subset` (the facts role already does `!all`/`!min`/`local`).
+  Raising the soft `nofile` limit (e.g. `/etc/security/limits.d/90-nofile.conf`
+  with `* soft nofile 65536`; hard is already 1048576) is still needed
+  for unfiltered `setup` and ad-hoc `-m setup`. Nothing in the repo
+  manages limits today. A udevadm / Errno 24 failure is an explicit
+  `setup` without `min`/`local`.
 
 ### Top-level playbook wiring (chunk 4e)
 
