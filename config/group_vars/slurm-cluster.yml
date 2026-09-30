@@ -97,6 +97,28 @@ partition_settings:
     slurm_max_job_timelimit: 30-00
     default: false
 
+# kosmos: QOS created by roles/slurm/tasks/controller.yml ("create QOS", then
+# "set QOS limits": sacctmgr modify qos where name=<key> set <k>=<v> ...).
+# Every name in a partition's slurm_allow_qos must be here. Keys and values
+# are sacctmgr's (e.g. MaxTRESPerUser: gres/gpu=2, MaxWall: 7-00:00:00,
+# Flags: DenyOnLimit); an empty dict only creates the QOS.
+# TODO before the reinstall: copy the limits from the live cluster
+# (sacctmgr -P show qos on atlas).
+slurm_qos:
+  a100_qos: {}
+  four_a100_qos: {}
+  eight_a100_qos: {}
+  h100_qos: {}
+  four_h100_qos: {}
+  eight_h100_qos: {}
+  a6000_qos: {}
+  four_a6000_qos: {}
+  eight_a6000_qos: {}
+  rtx_qos: {}
+  eight_rtx_qos: {}
+  cpu_qos: {}
+  cpu_128_qos: {}
+
 ################################################################################
 # Ansible facts                                                                #
 ################################################################################
