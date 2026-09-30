@@ -93,7 +93,7 @@ Rules for every step:
    Then check which nodes booted with which options and adjust
    `kernel_cmdline_gpu` / `kernel_cmdline_extra` if they differ from what
    `playbooks/generic/kernel.yml` would write (`pci=realloc=off` on GPU
-   nodes; gaia also had `iommu=pt`):
+   nodes; `iommu=pt` on gaia, from `config/host_vars/gaia`):
    `grep -A1 '### cat /proc/cmdline' ~/reinstall-snapshot/*/info.txt`.
    Secure Boot state is in the same file (`mokutil --sb-state`).
    The snapshot also lists what was installed by hand under `/usr/local` and
