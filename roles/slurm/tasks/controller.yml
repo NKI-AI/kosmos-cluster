@@ -45,6 +45,50 @@
     daemon-reload: yes
   when: ansible_os_family == "RedHat"
 
+# kosmos: SchedMD's MariaDB settings for slurmdbd
+# (https://slurm.schedmd.com/accounting.html), applied before slurmdbd first
+# creates its tables. Memory from /proc/meminfo: implicit fact gathering is
+# the min subset, which has no memory facts.
+- name: read total memory (MB) for the InnoDB buffer pool
+  command: awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo
+  register: slurm_mariadb_memtotal
+  changed_when: false
+  check_mode: false
+  when:
+  - ansible_os_family == "Debian"
+  - slurm_mariadb_tune | bool
+
+- name: write the MariaDB tuning drop-in for slurmdbd
+  vars:
+    buffer_pool_mb: "{{ slurm_mariadb_buffer_pool_mb | default([(slurm_mariadb_memtotal.stdout | int * 0.25) | int, 4096] | min) }}"
+  copy:
+    dest: /etc/mysql/mariadb.conf.d/99-slurmdbd.cnf
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/slurm/tasks/controller.yml, kosmos).
+      # SchedMD recommendations for slurmdbd, https://slurm.schedmd.com/accounting.html
+      [mysqld]
+      innodb_buffer_pool_size = {{ buffer_pool_mb }}M
+      innodb_log_file_size = {{ (buffer_pool_mb | int / 4) | int }}M
+      innodb_lock_wait_timeout = {{ slurm_mariadb_lock_wait_timeout }}
+      max_allowed_packet = {{ slurm_mariadb_max_allowed_packet }}
+
+      [mariadbd]
+      # slurmdbd cannot recover from the rollbacks this causes (MariaDB >= 10.6.18;
+      # loose- so older servers ignore the unknown option).
+      loose-innodb_snapshot_isolation = OFF
+  register: slurm_mariadb_dropin
+  when:
+  - ansible_os_family == "Debian"
+  - slurm_mariadb_tune | bool
+
+- name: restart mariadb to apply the tuning
+  systemd:
+    name: mariadb
+    state: restarted
+    enabled: yes
+  when: slurm_mariadb_dropin is changed
+
 - name: setup slurm db user
   mysql_user:
     name: "{{ slurm_db_username }}"

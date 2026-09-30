@@ -22,6 +22,12 @@ slurm_cuda_prefix: /usr/local/cuda
 slurm_configure:  './configure --prefix={{ slurm_install_prefix }} --disable-dependency-tracking --disable-debug --disable-x11 --enable-really-no-cray --enable-salloc-kill-cmd --with-hdf5=no --sysconfdir={{ slurm_config_dir }} --enable-pam --with-pam_dir={{ slurm_pam_lib_dir }} --with-shared-libslurm --without-rpath --with-pmix={{ pmix_install_prefix }} --with-hwloc={{ hwloc_install_prefix }}'
 slurm_configure_nvml:  './configure --prefix={{ slurm_install_prefix }} --disable-dependency-tracking --disable-debug --disable-x11 --enable-really-no-cray --enable-salloc-kill-cmd --with-hdf5=no --sysconfdir={{ slurm_config_dir }} --enable-pam --with-pam_dir={{ slurm_pam_lib_dir }} --with-shared-libslurm --without-rpath --with-pmix={{ pmix_install_prefix }} --with-hwloc={{ hwloc_install_prefix }} --with-nvml={{ slurm_cuda_prefix }}'
 slurm_force_rebuild: no
+# kosmos: MariaDB drop-in for slurmdbd (controller.yml). Buffer pool
+# defaults to 25 % of RAM, at most 4096 MB; set slurm_mariadb_buffer_pool_mb
+# to override.
+slurm_mariadb_tune: true
+slurm_mariadb_lock_wait_timeout: 900
+slurm_mariadb_max_allowed_packet: 16M
 slurm_contain_ssh: yes
 
 slurm_cluster_name: deepops
