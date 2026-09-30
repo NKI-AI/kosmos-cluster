@@ -445,6 +445,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 18 | `playbooks/nvidia-software/nvidia-driver.yml`, `playbooks/nvidia-software/tasks/nvidia-fabricmanager.yml` | on nodes with NVSwitch chips (`gpus.nvswitch_count > 0`: herakles) installs `nvidia-fabricmanager-<branch>` pinned to the installed driver's upstream version, enables the service and waits until `nvidia-smi -q` shows every GPU's fabric `Completed`/`Success` | upstream: fabric manager only in `roles/nvidia-dgx` (DGX OS); master: none, herakles was set up by hand | An HGX system without a fabric manager at the driver's exact version has no working CUDA ("system not yet initialized"); after a clean install nothing else would install it. Ubuntu publishes driver and fabric manager at the same version string. Flip: delete the include | 2026-09-29 |
 | 19 | `config/group_vars/all.yml` | `dcgm_pkg_name: datacenter-gpu-manager-4-cuda13` (derived from `nvidia_driver_branch`: 13 for 580 and newer, else 12) | role default `datacenter-gpu-manager` (DCGM 3) | NVIDIA's ubuntu2604 repository carries only DCGM 4. On the 22.04 nodes DCGM 3.3.6 is held, so the switch only happens on the reinstall. Flip: delete the line | 2026-09-29 |
 | 20 | `roles/facts/files/gpus.fact`, `playbooks/nvidia-software/nvidia-driver.yml`, `config/group_vars/all.yml` | the `gpus` fact adds `pci_ids` (vendor:device of the NVIDIA display controllers) and `nvswitch_count`, both from `lspci -n` (`count` unchanged); the driver playbook refuses a GPU missing from `nvidia_gpu_architectures`, or a legacy architecture (Maxwell, Pascal, Volta) with a branch above 580 or the open kernel modules | `gpus` reports only `count` (by `lspci` name match); no check | Drivers are chosen per architecture and the choice has to be made before a driver exists on a freshly installed node, so it cannot come from `nvidia-smi`; `lspci` names are not reliable (22.04 does not know the H100). Tested 2026-09-29 on six node types: same `count` as the old script. Flip: `git checkout master -- roles/facts/files/gpus.fact` and delete the assert | 2026-09-29 |
+| 21 | `roles/slurm/templates/etc/slurm/gres.conf`, `config/group_vars/slurm-cluster.yml` | `gres.conf` is `AutoDetect=nvidia` when `slurm_version` is 24.11 or newer (`slurm_gres_autodetect`); below that the generated per-GPU lines are unchanged; the `gpu_topology` host_vars of carlos, plato and schrodinger are deleted | one `Name=gpu File=/dev/nvidiaN Cores=<local_cpulist>` line per GPU from the topology fact, or `AutoDetect=nvml` (which installs CUDA on every Slurm host and builds against NVML) | The generated `Cores=` lists are Linux CPU thread ids (e.g. `0-9,20-29` on a 20-core node); Slurm rejects any list containing an id at or above the core count ("invalid GRES core specification", `bit_unfmt`), so no node had GPU-CPU affinity (survey 2026-09-30, `docs/kosmos/gpu-inventory.md`). The fact also assumes `/dev/nvidiaN` follows PCI order, which is false on six nodes, and aristarchus carried a hand-edited file with two GPUs on the wrong socket. AutoDetect=nvidia (Slurm 24.11+) reads the driver's device minors and converts `local_cpulist` to Slurm core ids, without NVML; it detects no NVLinks. An untyped `Gres=gpu:N` in slurm.conf still matches (the detected type is dropped). The driver must be loaded before slurmd starts. Flip: set `slurm_gres_autodetect: ""` | 2026-09-30 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -840,10 +841,10 @@ area has several leftovers that need a decision (update or remove).
   host_vars") was wrong for the same reason. On this branch the keys are
   gone, partition membership is an inventory group per partition, and the
   README describes how to add or remove a node.
-- `config/host_vars/{carlos,plato,schrodinger}` (now only their
-  `gpu_topology` overrides) and the commented hosts in the
-  `partition_rtx2080ti_sm` inventory group describe phased-out nodes;
-  remove once the nodes are gone for good. mariecurie and the `p6000`
+- The commented hosts in the `partition_rtx2080ti_sm` inventory group
+  describe phased-out nodes; remove once the nodes are gone for good.
+  `config/host_vars/{carlos,plato,schrodinger}` held only `gpu_topology`
+  overrides that no template reads; removed 2026-09-30 (deviation 21). mariecurie and the `p6000`
   partition were removed 2026-09-29 (dropped with the reinstall).
 
 ### Site config (chunk 5b)

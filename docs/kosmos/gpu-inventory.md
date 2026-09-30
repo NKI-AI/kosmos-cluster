@@ -65,6 +65,43 @@ and DCGM package names follow it.
   false`), as on 22.04. Every GPU above supports them; NVIDIA makes them the
   default for Turing and newer, and Blackwell GPUs require them.
 
+## Slurm GPU-CPU affinity (gres.conf)
+
+Surveyed 2026-09-30 on all nine GPU nodes (Slurm 23.02.4). `gres.conf` tells
+slurmd which device file each GPU is and which CPU cores sit on its socket.
+The generated file used the topology fact's `local_cpulist` for `Cores=`:
+Linux CPU **thread** ids, while Slurm expects its own **core** ids. With
+hyperthreading every list contains ids beyond the core count, and Slurm
+rejects the whole list ("invalid GRES core specification", `bit_unfmt` in
+`src/common/bitstring.c`), so no GPU had CPU affinity. That shows as
+`Gres=gpu:8` without `(S:...)` in `scontrol show node`.
+
+| Nodes | Slurm cores | Generated `Cores=` (socket 0 GPU) | `/dev/nvidiaN` in PCI order |
+|-------|-------------|-----------------------------------|-----------------------------|
+| alanturing, hamilton, roentgen | 0-19 | `0-9,20-29` | yes |
+| aristarchus, galileo, ptolemaeus, euctemon, eudoxus | 0-63 | `0-31,64-95` | no |
+| herakles | 0-95 | `0-47,96-143` | no |
+
+The fact also numbers GPUs in PCI order, while the driver's device minors
+(`/proc/driver/nvidia/gpus/*/information`) differ on six nodes; the shuffle
+stayed within a socket everywhere except aristarchus, whose hand-edited
+`gres.conf` (eight lines, two commented out) put `nvidia2`/`nvidia3` on
+socket 0 instead of 1. The `gpu_topology` lists in the host_vars of carlos,
+plato and schrodinger were never read by any template.
+
+From Slurm 24.11, `gres.conf` is a single `AutoDetect=nvidia` line
+(`slurm_gres_autodetect` in `config/group_vars/slurm-cluster.yml`). slurmd
+then reads the device minors itself and converts each GPU's CPU list to
+Slurm core ids; no NVML build and no CUDA toolkit are needed. It does not
+detect NVLinks (`AutoDetect=nvml` would, and could prefer bridged pairs on the
+A6000/A100 nodes). `Gres=gpu:N` in slurm.conf stays untyped and still matches.
+The driver must be loaded before slurmd starts, or the node reports fewer
+GPUs than configured and is drained: `playbooks/slurm-cluster.yml` installs
+the driver before Slurm. Check after the reinstall with
+`scontrol show node <node>`: a socket suffix such as `Gres=gpu:8(S:0-1)`
+means the affinity is known (`(S:0)` on alanturing and hamilton, whose GPUs
+all hang off socket 0).
+
 ## Adding a GPU node
 
 1. Put the node in `config/inventory` (see the README).

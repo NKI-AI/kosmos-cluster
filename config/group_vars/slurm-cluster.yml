@@ -100,6 +100,15 @@ ansible_gather_subset:
 # See docs/slurm-cluster/nvml.md for details.
 slurm_autodetect_nvml: false
 
+# kosmos: let slurmd detect the GPUs itself (gres.conf AutoDetect). "nvidia"
+# (Slurm >= 24.11) reads the driver's device numbering and converts each GPU's
+# CPU affinity to Slurm core numbers; it needs no NVML, so none of the CUDA
+# install slurm_autodetect_nvml brings, but it detects no NVLinks or MIG.
+# Below 24.11 gres.conf is generated from the topology fact, whose Cores=
+# lists are Linux CPU thread ids that Slurm rejects (docs/kosmos/gpu-inventory.md).
+# The NVIDIA driver must be loaded before slurmd starts.
+slurm_gres_autodetect: "{{ 'nvidia' if slurm_version is version('24.11', '>=') else '' }}"
+
 # Ensure hosts file generation only runs across slurm cluster
 hosts_add_ansible_managed_hosts_groups: ["slurm-cluster"]
 

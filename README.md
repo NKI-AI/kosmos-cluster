@@ -31,8 +31,8 @@
 >   partition (default memory per CPU, CPUs per GPU, time limit, QoS). Partition
 >   settings apply to every node in the partition; Slurm has no per-node override.
 > - `config/host_vars/<host>`: only if the node needs something different from the
->   rest, such as a driver branch pin (`nvidia_driver_branch`) or a `gpu_topology`
->   override. Most nodes need no file.
+>   rest, such as a driver branch pin (`nvidia_driver_branch`). Most nodes need no
+>   file. GPUs and their CPU affinity come from the node itself, not from here.
 >
 > `slurm.conf` is rendered from these on the controller by
 > `playbooks/slurm-cluster/slurm.yml`; `docs/kosmos/render-slurm-conf.yml` renders it
