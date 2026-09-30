@@ -30,10 +30,11 @@ Rules for every step:
    `config/group_vars/slurm-cluster.yml` from `sacctmgr -P show qos` on
    2026-09-30. If anyone changes a QOS on the live cluster before the wipe,
    update it there too; `sacctmgr-qos.txt` from step 1.2 is the final check.
-2. **Secrets.** `slurm_password` and `slurm_db_password` come from the shared
-   vault on teuwen-ansible (set up by another admin), with new values. The
-   munge key is derived from `slurm_password`, so every host gets the new key
-   on its first run; nothing old has to keep talking to it.
+2. **Secrets.** Done: `slurm_password` and `slurm_db_password` come from the
+   shared file on teuwen-ansible (`docs/kosmos/slurm-secrets.md`); run from a
+   login shell so `KOSMOS_SLURM_SECRETS_FILE` is set. The munge key is
+   derived from `slurm_password`, so every host gets the new key on its first
+   run; nothing old has to keep talking to it.
 3. **Dry run against the live cluster** (22.04, nothing changes):
 
    ```bash
@@ -167,7 +168,7 @@ to 23.02 other than the backups from step 1.
 
 ## 4. What changed on purpose
 
-Deviations 23-29 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
+Deviations 23-30 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
 commits cherry-picked onto `reinstall-prep` (exporter restart and local
 build, retired Singularity wrapper, epilog/prolog fixes, NHC sshd match,
 pam_slurm_adopt guard, slurmd PATH).

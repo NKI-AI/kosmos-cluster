@@ -39,7 +39,7 @@ superseded upstream.
 of the twelve hosts on Ubuntu 24.04.5 with the HWE 7.0 kernel and a fresh
 Slurm 26.05.4 install with a new accounting database, not an in-place
 upgrade. carlos, plato, mariecurie and schrodinger are gone. Branch
-`reinstall-prep` prepares for it (deviations 23-29, 25 upstream commits
+`reinstall-prep` prepares for it (deviations 23-30, 25 upstream commits
 cherry-picked); the order of work is in `docs/kosmos/reinstall-runbook.md`.
 Check-run results below were taken on the 22.04 install and describe it.
 
@@ -349,7 +349,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 
 - **A real run would replace the munge key, and only on the hosts in the
   run. Do not run `slurm.yml` for real on this branch before the vault
-  change (`docs/kosmos/slurm-secrets-vault.md`) is rolled out on all
+  change (`docs/kosmos/slurm-secrets.md`) is rolled out on all
   twelve hosts in one run, on 2026-10-05.** The key is
   `slurm_password | password_hash('sha512', slurm_cluster_name)`. With the
   old env (ansible-core 2.16, no passlib) that gives the Python `crypt`
@@ -468,6 +468,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 27 | `roles/slurm/tasks/controller.yml`, `roles/slurm/defaults/main.yml` | writes `/etc/mysql/mariadb.conf.d/99-slurmdbd.cnf` (InnoDB buffer pool 25 % of RAM up to 4 GiB, log file a quarter of it, `innodb_lock_wait_timeout=900`, `max_allowed_packet=16M`, `innodb_snapshot_isolation=OFF`) and restarts MariaDB before the slurm DB user is created | MariaDB defaults | SchedMD's recommendations for slurmdbd; `innodb_snapshot_isolation` (MariaDB >= 10.6.18) causes rollbacks slurmdbd cannot recover from. Moved from the upgrade playbook into the normal deploy. Flip: `slurm_mariadb_tune: false` | 2026-09-30 |
 | 28 | `roles/slurm/tasks/controller.yml`, `config/group_vars/slurm-cluster.yml` (`slurm_qos`) | creates every QOS in `slurm_qos` and sets its limits (`sacctmgr modify qos`); asserts that every name in a partition's `slurm_allow_qos` is defined | only the cluster, `compute-account` and the running admin are created; QOS were made by hand | Partitions allow only these QOS and `AccountingStorageEnforce` includes qos, so on a fresh database jobs could not run and `sacctmgr load` of the old associations would fail without them. Flip: `slurm_qos: {}` and drop the tasks | 2026-09-30 |
 | 29 | `config/group_vars/slurm-cluster.yml` | `slurm_exporter_build_dir: "{{ deepops_dir }}/build/slurm-exporter"` | upstream role default `/opt/deepops/build/slurm-exporter` | The DeepOps-owned exporter (upstream 7393884e, 59fa7a00, cherry-picked) builds its image locally; every other build directory derives from `deepops_dir`. Flip: delete the line | 2026-09-30 |
+| 30 | `config/group_vars/slurm-cluster.yml` | `slurm_password` and `slurm_db_password` read from the YAML file named by `KOSMOS_SLURM_SECRETS_FILE` (set at login on teuwen-ansible by `/etc/profile.d/kosmos-slurm-secrets.sh`); unset variable stops the run | the upstream placeholder strings in plain text | The munge key is derived from `slurm_password`; with the public placeholder anyone could compute it. A shared file for the teuwen-sudoers group instead of an Ansible vault (decided by the admins 2026-09-30); see `docs/kosmos/slurm-secrets.md`. Flip: put the two values back in group_vars | 2026-09-30 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -545,7 +546,7 @@ one-off grub fix, the vault/munge rollout onto running nodes, the stepped
 23.02 -> 24.11 -> 26.05 upgrade, the docker upgrade on gaia and eudoxus,
 podman-docker on herakles) no longer apply. The order of work is in
 `docs/kosmos/reinstall-runbook.md`. What remains of the items in this
-section: the vault (shared vault on teuwen-ansible, another admin), atlas's
+section: atlas's
 Kerberos host principal (not a priority), and the first full run of
 `playbooks/slurm-cluster.yml`, now on freshly installed nodes.
 
@@ -880,10 +881,9 @@ area has several leftovers that need a decision (update or remove).
     nodes back in line.
 - `slurm_password` / `slurm_db_password` are still the upstream placeholder
   strings, on master and here. They should live in an Ansible vault. **NOTE**:
-  this is addressed in `docs/kosmos/slurm-secrets-vault.md`. Passwords
-  should be stored in a vault which all admins have access to (2026-09-30:
-  a shared vault on teuwen-ansible is being set up by another admin; the
-  first real run on the reinstalled cluster needs it).
+  this is addressed in `docs/kosmos/slurm-secrets.md`. **Resolved
+  2026-09-30:** a shared secrets file on teuwen-ansible (teuwen-sudoers),
+  read by `config/group_vars/slurm-cluster.yml` (deviation 30).
 - Decisions, not defects: NHC runs with the role's default `nhc.conf`
   template (the example recommends a site `nhc_config_template`).
 - **Correction (2026-09-08): the monitoring server side is not inert.** An

@@ -44,8 +44,16 @@ slurm_manage_gpus: true
 
 slurm_cluster_name: kosmos
 
-slurm_password: ReplaceWithASecurePasswordInTheVault
-slurm_db_password: AlsoReplaceWithASecurePasswordInTheVault
+# kosmos: secrets from the shared file on teuwen-ansible (root:teuwen-sudoers,
+# 0640). /etc/profile.d/kosmos-slurm-secrets.sh exports its path as
+# KOSMOS_SLURM_SECRETS_FILE at login; the file is YAML with slurm_password
+# and slurm_db_password. Read on the Ansible node only when a task needs
+# them; a run without the variable fails instead of using a placeholder.
+# slurm_password seeds the munge key (templates/etc/munge/munge.key.j2),
+# slurm_db_password is the slurmdbd MariaDB password.
+slurm_secrets_file: "{{ lookup('env', 'KOSMOS_SLURM_SECRETS_FILE') or undef(hint='KOSMOS_SLURM_SECRETS_FILE is not set: open a new login shell on teuwen-ansible (/etc/profile.d/kosmos-slurm-secrets.sh)') }}"
+slurm_password: "{{ (lookup('file', slurm_secrets_file) | from_yaml).slurm_password }}"
+slurm_db_password: "{{ (lookup('file', slurm_secrets_file) | from_yaml).slurm_db_password }}"
 
 slurm_default_job_timelimit: 60
 slurm_grace_time: 120  # time in seconds to allow for job cleanup
