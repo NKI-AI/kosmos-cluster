@@ -54,9 +54,9 @@ Rules for every step:
    `slurm_db_password` come from the shared file on teuwen-ansible. The
    munge key is derived from `slurm_password`, so every host gets the new
    key on its first run.
-3. **Dry run against the live cluster** (22.04, nothing changes), from
-   `reinstall-prep` before it is merged (`git switch reinstall-prep && git
-   pull` in your clone):
+3. **Dry run against the live cluster. Done (2026-10-01).** Nothing
+   changes on the 22.04 hosts. Run from `reinstall-prep` before it is merged
+   (`git switch reinstall-prep && git pull` in your clone):
 
    ```bash
    ansible-playbook -kK --check --diff --flush-cache \
@@ -83,7 +83,16 @@ Rules for every step:
    stopped at the Docker install before monitoring. Diffs as intended:
    old nodes and partitions gone from `slurm.conf`, rtx2080ti the default,
    `gres.conf` is `AutoDetect=nvidia`, no `CgroupAutomount`. Docker 28.3.3
-   and containerd.io 1.6.32 exist for noble.
+   and containerd.io 1.6.32 exist for noble. The third (also without the
+   Docker install) ran to the end on atlas and kosmos; on the nodes only
+   22.04 or check-mode failures were left: Apptainer 1.5.4 needs libfuse3
+   3.12 (22.04 has 3.10.5, 24.04 has 3.14.0), and herakles's node exporter
+   unit does not exist in check mode. Not checked against a live node:
+   herakles's DCGM exporter and rsyslog client.
+
+   To redo one part only, run its own playbook with the same `-l`, e.g.
+   `ansible-playbook -kK -l gaia playbooks/container/apptainer.yml`, or use
+   the tags in `playbooks/slurm-cluster.yml` (`--tags`/`--skip-tags`).
 4. Merge `reinstall-prep` into `deepops-26.07` (pull request). Step 1.2
    needs it: the backup playbook is only on this branch.
 5. Announcement (Daan): section 5 below.
