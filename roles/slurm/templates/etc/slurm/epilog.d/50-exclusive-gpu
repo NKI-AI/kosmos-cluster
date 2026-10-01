@@ -19,5 +19,9 @@ then
     scontrol update nodename="$HOSTNAME" state=drain reason='Residual GPU processes found'
 fi
 
-/etc/slurm/shared/bin/set_gpu_power_levels.sh default
-/etc/slurm/shared/bin/set_gpu_clocks.sh default
+# kosmos: best effort, as in prolog.d/50-exclusive-gpu: a failing epilog
+# drains the node.
+/etc/slurm/shared/bin/set_gpu_power_levels.sh default ||
+    logger -s -t slurm-epilog "Could not reset the GPU power limits; continuing"
+/etc/slurm/shared/bin/set_gpu_clocks.sh default ||
+    logger -s -t slurm-epilog "Could not reset the GPU clocks; continuing"
