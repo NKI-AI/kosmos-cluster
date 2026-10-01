@@ -8,6 +8,9 @@ slurm_build_deps:
   - libmariadbclient-dev-compat
   - libpam0g-dev
   - libdbus-1-dev
+  # kosmos: --json/--yaml output (configure --with-json --with-yaml)
+  - libjson-c-dev
+  - libyaml-dev
   - python3-minimal
   - ruby-dev
   - wget
