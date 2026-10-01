@@ -244,7 +244,8 @@ That is harmless; power it off or ignore it.
      (deviation 37).
    - NHC: `sinfo -R` shows no drain reasons on healthy nodes, also after a
      node reboot with nobody logged in (24.04 starts sshd on the first
-     connection, `systemctl is-enabled ssh.socket`; NHC checks for sshd).
+     connection; NHC checks that `ssh.socket` or `ssh.service` is active,
+     deviation 40).
    - Apptainer on a compute node, as a normal user:
      `srun apptainer exec docker://alpine true` (user namespaces under
      24.04's AppArmor); kosmos has no Apptainer.
@@ -313,7 +314,7 @@ before changing `kernel_cmdline_*`.
 
 ## What changed on purpose
 
-Deviations 23-39 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
+Deviations 23-40 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
 commits cherry-picked onto `reinstall-prep` (exporter restart and local
 build, retired Singularity wrapper, epilog/prolog fixes, NHC sshd match,
 pam_slurm_adopt guard, slurmd PATH).

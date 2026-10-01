@@ -15,7 +15,14 @@
 # loop ansible_interfaces here; that needs network facts we no longer gather.
 
 # Check that expected processes are running
+{% if ansible_distribution == 'Ubuntu' and ansible_distribution_version is version('22.10', '>=') %}
+# kosmos: since 22.10 Ubuntu starts sshd on the first connection (ssh.socket),
+# so after a reboot nobody has connected to there is no sshd process and the
+# process check would drain the node. Check that ssh is reachable instead.
+ {{ ansible_hostname }} || check_cmd_status -t 5 -r 0 systemctl is-active --quiet ssh.socket ssh.service
+{% else %}
  {{ ansible_hostname }} || check_ps_service -u root -d {{ nhc_ssh_daemon }} sshd
+{% endif %}
  {{ ansible_hostname }} || check_ps_service -u root slurmd
 
 {% if ansible_local.gpus.count > 0 %}
