@@ -61,21 +61,29 @@ Rules for every step:
    ```bash
    ansible-playbook -kK --check --diff --flush-cache \
      -l atlas,kosmos,gaia,aristarchus,herakles -e '{"install_dcgm": false}' \
-     playbooks/slurm-cluster.yml | tee ~/check-reinstall-prep.log
+     --skip-tags docker playbooks/slurm-cluster.yml | tee ~/check-reinstall-prep.log
    ```
 
    Must reach the end without undefined-variable or template errors, and
-   `failed=0` for every host. DCGM is skipped: on the live nodes it can only
-   fail (herakles: the CUDA keyring is not installed in check mode;
-   aristarchus: the installed DCGM 3 conflicts with DCGM 4), and a failed
-   host drops out of the rest of the run. Expected noise: hwloc/PMIx/Slurm
+   `failed=0` for every host. DCGM and the Docker install are skipped: on
+   the live nodes they can only fail in check mode (herakles: the CUDA and
+   Docker repositories are not added in check mode; aristarchus: the
+   installed DCGM 3 conflicts with DCGM 4; everywhere: the Docker packages
+   are held, and check mode does not lift the hold), and a failed host drops
+   out of the rest of the run. Check-mode only, also expected: the Slurm
+   role's grub task "reboots" the compute nodes (in a real run `kernel.yml`
+   has already written that line). Expected noise: hwloc/PMIx/Slurm
    "uninstall and rebuild", grub and kernel diffs (the HWE packages are
    skipped on 22.04), docker version changes. The munge key and the slurmdbd
    password are kept out of `--diff`.
 
-   First run 2026-10-01: stopped at the gres/gpu wait on atlas (check-mode
-   bug, fixed) and at DCGM on herakles and aristarchus; `slurm.conf` diff as
-   intended (old nodes and partitions gone, rtx2080ti the default).
+   Runs on 2026-10-01: the first stopped at the gres/gpu wait on atlas
+   (check-mode bug, fixed) and at DCGM on herakles and aristarchus. The
+   second (without DCGM) got through all of `slurm.yml` on every host and
+   stopped at the Docker install before monitoring. Diffs as intended:
+   old nodes and partitions gone from `slurm.conf`, rtx2080ti the default,
+   `gres.conf` is `AutoDetect=nvidia`, no `CgroupAutomount`. Docker 28.3.3
+   and containerd.io 1.6.32 exist for noble.
 4. Merge `reinstall-prep` into `deepops-26.07` (pull request). Step 1.2
    needs it: the backup playbook is only on this branch.
 5. Announcement (Daan): section 5 below.
