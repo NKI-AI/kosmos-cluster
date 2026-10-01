@@ -538,6 +538,18 @@ issues were removed; corrections are marked "corrected 2026-09-08".
 
 **By priority:**
 
+- **High, after the reinstall: make the repository private** (decided
+  2026-10-01). `NKI-AI/kosmos-cluster` is public. No secret values are in
+  it (deviation 30), but it maps the cluster: hostnames, partitions, admin
+  group names, NFS servers, that atlas has no Kerberos host principal, and
+  that the 23.02 cluster's munge key is derived from the public DeepOps
+  placeholder (true until the reinstall). It is a GitHub fork of
+  `NVIDIA/deepops`, and GitHub does not switch a public fork to private:
+  ask GitHub support to detach it from the fork network, or mirror it into
+  a new private repository and repoint every clone's `origin` (teuwen-ansible
+  and the admins' clones). Going private does not take back what was
+  already public: scan the git history for real secrets first and rotate
+  anything found.
 - **Blocking a real run of `slurm.yml`: the munge key.** env-26.07 hashes
   `slurm_password` differently from the old env, so any real run rewrites
   the munge key on the hosts it touches and cuts them off from the rest
