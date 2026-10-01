@@ -1,8 +1,7 @@
 ---
-# facts.d on compute nodes. Implicit gather is min (group_vars).
+# facts.d on compute nodes (implicit gather is min via ansible.cfg).
 - hosts: slurm-node
   become: yes
-  gather_facts: true
   roles:
     - name: facts
 
