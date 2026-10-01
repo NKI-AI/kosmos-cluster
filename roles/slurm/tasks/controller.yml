@@ -287,7 +287,8 @@
 # kosmos: QOS limits (slurm_qos). A new accounting database knows only the
 # built-in TRES; gres/gpu is added when slurmctld first starts with
 # AccountingStorageTRES=gres/gpu, and sacctmgr rejects a gres/gpu limit before
-# that. So wait for it after the restart above.
+# that. So wait for it after the restart above. Not in check mode: the
+# command does not run there, so the wait would always time out.
 - name: wait until slurmctld has registered the gres/gpu TRES
   command: sacctmgr -nP show tres where type=gres name=gpu format=Type,Name
   register: slurm_gpu_tres
@@ -296,7 +297,7 @@
   delay: 5
   changed_when: false
   run_once: true
-  when: slurm_manage_gpus | bool
+  when: slurm_manage_gpus | bool and not ansible_check_mode
   environment:
     PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
 

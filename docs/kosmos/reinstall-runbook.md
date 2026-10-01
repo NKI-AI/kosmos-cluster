@@ -60,14 +60,22 @@ Rules for every step:
 
    ```bash
    ansible-playbook -kK --check --diff --flush-cache \
-     -l atlas,kosmos,gaia,aristarchus,herakles playbooks/slurm-cluster.yml | tee ~/check-reinstall-prep.log
+     -l atlas,kosmos,gaia,aristarchus,herakles -e '{"install_dcgm": false}' \
+     playbooks/slurm-cluster.yml | tee ~/check-reinstall-prep.log
    ```
 
-   Must reach the end without undefined-variable or template errors. Expected
-   noise: hwloc/PMIx/Slurm "uninstall and rebuild", grub and kernel diffs
-   (the HWE packages are skipped on 22.04), docker version changes, DCGM on
-   herakles (its CUDA keyring is missing). The munge key and the slurmdbd
+   Must reach the end without undefined-variable or template errors, and
+   `failed=0` for every host. DCGM is skipped: on the live nodes it can only
+   fail (herakles: the CUDA keyring is not installed in check mode;
+   aristarchus: the installed DCGM 3 conflicts with DCGM 4), and a failed
+   host drops out of the rest of the run. Expected noise: hwloc/PMIx/Slurm
+   "uninstall and rebuild", grub and kernel diffs (the HWE packages are
+   skipped on 22.04), docker version changes. The munge key and the slurmdbd
    password are kept out of `--diff`.
+
+   First run 2026-10-01: stopped at the gres/gpu wait on atlas (check-mode
+   bug, fixed) and at DCGM on herakles and aristarchus; `slurm.conf` diff as
+   intended (old nodes and partitions gone, rtx2080ti the default).
 4. Merge `reinstall-prep` into `deepops-26.07` (pull request). Step 1.2
    needs it: the backup playbook is only on this branch.
 5. Announcement (Daan): section 5 below.

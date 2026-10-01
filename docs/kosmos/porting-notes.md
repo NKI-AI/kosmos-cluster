@@ -469,7 +469,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 25 | `roles/nvidia_dcgm/tasks/main.yml` | `ansible_product_name \| default('')` in the DGX check | `ansible_product_name is search("DGX")` | `ansible_product_name` is a hardware fact; site config gathers only the `min` subset, so on a freshly installed node (empty fact cache) it is undefined and the role fails. Flip: remove the default | 2026-09-30 |
 | 26 | `roles/facts/tasks/gather-slurm-nodes.yml`, `roles/slurm/templates/etc/slurm/slurm.conf` | with `-e slurm_nodes_allow_unreachable=true` (reinstall batches only) an unreachable slurm-node does not stop atlas's play (`slurm_nodes_unreachable`); without it the play stops, as before; slurm.conf lists only nodes that were reached and have the custom facts, and partitions only with those nodes | one unreachable node aborts the controller play; a node without facts fails the render | During the reinstall nodes come back one by one; a node joins slurm.conf on the first `slurm-cluster.yml -l atlas,<node>` run. `delegate_facts` on a loop keeps nothing once any item is unreachable (ansible-core 2.17), hence the explicit set_fact. With every node reachable the rendered file is byte-identical. Not the default: after go-live, dropping a briefly unreachable node from slurm.conf (slurmctld restarts) would fail its running jobs and the pending jobs of single-node partitions (h100, cpu, rtx8000). Flip: `git checkout <before> -- roles/facts/tasks/gather-slurm-nodes.yml` and the template loop | 2026-09-30 |
 | 27 | `roles/slurm/tasks/controller.yml`, `roles/slurm/defaults/main.yml` | writes `/etc/mysql/mariadb.conf.d/99-slurmdbd.cnf` (InnoDB buffer pool 25 % of RAM up to 4 GiB, log file a quarter of it, `innodb_lock_wait_timeout=900`, `max_allowed_packet=16M`, `innodb_snapshot_isolation=OFF`) and restarts MariaDB before the slurm DB user is created | MariaDB defaults | SchedMD's recommendations for slurmdbd; `innodb_snapshot_isolation` (MariaDB >= 10.6.18) causes rollbacks slurmdbd cannot recover from. Moved from the upgrade playbook into the normal deploy. Flip: `slurm_mariadb_tune: false` | 2026-09-30 |
-| 28 | `roles/slurm/tasks/controller.yml`, `config/group_vars/slurm-cluster.yml` (`slurm_qos`) | creates every QOS in `slurm_qos` before slurmctld starts and sets its limits (`sacctmgr modify qos`) after it has started and registered the `gres/gpu` TRES (a new database knows only the built-in TRES, and sacctmgr rejects a `gres/gpu` limit before that; the limits task cannot report changes); asserts that every name in a partition's `slurm_allow_qos` is defined | only the cluster, `compute-account` and the running admin are created; QOS were made by hand | Partitions allow only these QOS and `AccountingStorageEnforce` includes qos, so on a fresh database jobs could not run and `sacctmgr load` of the old associations would fail without them. Flip: `slurm_qos: {}` and drop the tasks | 2026-09-30 |
+| 28 | `roles/slurm/tasks/controller.yml`, `config/group_vars/slurm-cluster.yml` (`slurm_qos`) | creates every QOS in `slurm_qos` before slurmctld starts and sets its limits (`sacctmgr modify qos`) after it has started and registered the `gres/gpu` TRES (a new database knows only the built-in TRES, and sacctmgr rejects a `gres/gpu` limit before that; the wait is skipped in check mode; the limits task cannot report changes); asserts that every name in a partition's `slurm_allow_qos` is defined | only the cluster, `compute-account` and the running admin are created; QOS were made by hand | Partitions allow only these QOS and `AccountingStorageEnforce` includes qos, so on a fresh database jobs could not run and `sacctmgr load` of the old associations would fail without them. Flip: `slurm_qos: {}` and drop the tasks | 2026-09-30 |
 | 29 | `config/group_vars/slurm-cluster.yml` | `slurm_exporter_build_dir: "{{ deepops_dir }}/build/slurm-exporter"` | upstream role default `/opt/deepops/build/slurm-exporter` | The DeepOps-owned exporter (upstream 7393884e, 59fa7a00, cherry-picked) builds its image locally; every other build directory derives from `deepops_dir`. Flip: delete the line | 2026-09-30 |
 | 30 | `config/group_vars/slurm-cluster.yml` | `slurm_password` and `slurm_db_password` read from the YAML file named by `KOSMOS_SLURM_SECRETS_FILE` (set at login on teuwen-ansible by `/etc/profile.d/kosmos-slurm-secrets.sh`); unset variable stops the run | the upstream placeholder strings in plain text | The munge key is derived from `slurm_password`; with the public placeholder anyone could compute it. A shared file for the teuwen-sudoers group instead of an Ansible vault (decided by the admins 2026-09-30); see `docs/kosmos/slurm-secrets.md`. Flip: put the two values back in group_vars | 2026-09-30 |
 | 31 | `playbooks/slurm-cluster/slurm-backup.yml` (new) | backs up the accounting database (mysqldump), `sacctmgr` dump, QOS and associations, the whole job history (`sacct` as text), state directory, configuration and installed Slurm files on the controller, and fetches everything except the state directory and installed files to `~/slurm-backups` on the Ansible node | nothing; backups by hand | Needed before the reinstall wipes atlas (runbook step 1.2). Taken from `slurm-upgrade-26.04` (Tim Veenboer, 1b167673, fix 0626c07b) without the stepped-upgrade playbook, which the clean reinstall made obsolete; added the job-history export and fetches the text exports. Flip: delete the file | 2026-09-30 |
@@ -550,6 +550,38 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   principal, so any `slurm.yml` run that includes atlas still needs `-k`.
   Join it to the realm
   (see "Running playbooks from teuwen-ansible").
+- **After go-live, not blocking: configless Slurm.** See "Configless Slurm"
+  below.
+
+### Configless Slurm (follow-up after go-live, decided 2026-10-01)
+
+Today (master and this branch, `slurm_conf_symlink: true`): the controller
+play renders `slurm.conf` into the shared `/sw/.slurm` (`slurmctl_config_dir`),
+and every other host's `/etc/slurm/slurm.conf` is a symlink to it
+(`roles/slurm/tasks/{controller,compute,misc-node}.yml`). The other config
+files (`gres.conf`, `cgroup.conf`, ...) are rendered on each host. Upstream's
+default (`false`) renders a copy of `slurm.conf` on every host instead.
+
+Costs of the symlink: `slurmd` cannot start, and the Slurm commands on kosmos
+fail, while `/sw` is not mounted; the link needed a workaround for the
+exporter container (deviation 34).
+
+Configless (SchedMD's recommended setup since Slurm 20.02):
+`SlurmctldParameters=enable_configless` on atlas, `slurmd --conf-server atlas`
+(or a DNS SRV record) on the nodes and kosmos. slurmd fetches `slurm.conf`,
+`gres.conf`, `cgroup.conf` and the rest from slurmctld at start and on
+`scontrol reconfigure`; no shared file and no links. The role has no support
+for it (nothing in `roles/slurm` mentions it).
+
+What it does not change: only the controller play builds `slurm.conf` from
+every node's facts, so a run that adds nodes still has to include atlas.
+
+Not done before the reinstall: it changes how slurmd starts on every host,
+the login node, the exporter mounts and the shared-config paths, with no
+time to test it. To do: the role change behind a variable, a test on one
+node, then the switch; drop `slurm_conf_symlink`, `slurmctl_config_dir` and
+deviation 34 afterwards. Check first which files configless serves in 26.05
+(prolog/epilog scripts are deployed by Ansible either way).
 
 ### Maintenance day 2026-10-05
 
