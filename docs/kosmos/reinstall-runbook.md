@@ -185,8 +185,11 @@ That is harmless; power it off or ignore it.
      the node's syslog).
    - An exclusive job per GPU partition, e.g. `srun --exclusive -p a6000
      --qos a6000_qos -N1 true`: the exclusive prolog/epilog (GPU clocks and
-     power) now run on Slurm 26.05; the node must not drain (the RTX 2080 Ti
-     nodes are the most likely to object).
+     power) now run on Slurm 26.05; the node must not drain. A GPU that
+     refuses a setting only logs `Could not set the GPU ...` in the node's
+     syslog (expected on the RTX 2080 Ti nodes; deviation 39).
+   - `squeue --json | head` and `sinfo --yaml | head` print JSON and YAML
+     (deviation 37).
    - NHC: `sinfo -R` shows no drain reasons on healthy nodes, also after a
      node reboot with nobody logged in (24.04 starts sshd on the first
      connection, `systemctl is-enabled ssh.socket`; NHC checks for sshd).
