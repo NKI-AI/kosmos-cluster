@@ -9,6 +9,9 @@ pmix_build_dir: /opt/deepops/build/pmix
 slurm_workflow_build: yes
 slurm_version: "26.05.1"
 slurm_src_url: "https://download.schedmd.com/slurm/slurm-{{ slurm_version }}.tar.bz2"
+# sha256 of the tarball; empty skips the check (kosmos)
+slurm_src_sha256: ""
+slurm_src_cache_dir: "{{ slurm_build_dir | dirname }}"
 slurm_build_make_clean: no
 slurm_build_dir_cleanup: no
 slurm_config_dir: /etc/slurm
@@ -16,9 +19,17 @@ slurmctl_config_dir: /sw/.slurm
 slurm_sysconf_dir: /etc/sysconfig
 slurm_install_prefix: /usr/local
 slurm_cuda_prefix: /usr/local/cuda
-slurm_configure:  './configure --prefix={{ slurm_install_prefix }} --disable-dependency-tracking --disable-debug --disable-x11 --enable-really-no-cray --enable-salloc-kill-cmd --with-hdf5=no --sysconfdir={{ slurm_config_dir }} --enable-pam --with-pam_dir={{ slurm_pam_lib_dir }} --with-shared-libslurm --without-rpath --with-pmix={{ pmix_install_prefix }} --with-hwloc={{ hwloc_install_prefix }}'
-slurm_configure_nvml:  './configure --prefix={{ slurm_install_prefix }} --disable-dependency-tracking --disable-debug --disable-x11 --enable-really-no-cray --enable-salloc-kill-cmd --with-hdf5=no --sysconfdir={{ slurm_config_dir }} --enable-pam --with-pam_dir={{ slurm_pam_lib_dir }} --with-shared-libslurm --without-rpath --with-pmix={{ pmix_install_prefix }} --with-hwloc={{ hwloc_install_prefix }} --with-nvml={{ slurm_cuda_prefix }}'
+# kosmos: --with-json --with-yaml make configure fail when json-c or libyaml
+# is missing instead of building without --json/--yaml
+slurm_configure:  './configure --prefix={{ slurm_install_prefix }} --disable-dependency-tracking --disable-debug --disable-x11 --enable-really-no-cray --enable-salloc-kill-cmd --with-hdf5=no --sysconfdir={{ slurm_config_dir }} --enable-pam --with-pam_dir={{ slurm_pam_lib_dir }} --with-shared-libslurm --without-rpath --with-pmix={{ pmix_install_prefix }} --with-hwloc={{ hwloc_install_prefix }} --with-json --with-yaml'
+slurm_configure_nvml:  './configure --prefix={{ slurm_install_prefix }} --disable-dependency-tracking --disable-debug --disable-x11 --enable-really-no-cray --enable-salloc-kill-cmd --with-hdf5=no --sysconfdir={{ slurm_config_dir }} --enable-pam --with-pam_dir={{ slurm_pam_lib_dir }} --with-shared-libslurm --without-rpath --with-pmix={{ pmix_install_prefix }} --with-hwloc={{ hwloc_install_prefix }} --with-json --with-yaml --with-nvml={{ slurm_cuda_prefix }}'
 slurm_force_rebuild: no
+# kosmos: MariaDB drop-in for slurmdbd (controller.yml). Buffer pool
+# defaults to 25 % of RAM, at most 4096 MB; set slurm_mariadb_buffer_pool_mb
+# to override.
+slurm_mariadb_tune: true
+slurm_mariadb_lock_wait_timeout: 900
+slurm_mariadb_max_allowed_packet: 16M
 slurm_contain_ssh: yes
 
 slurm_cluster_name: deepops
@@ -106,6 +117,8 @@ hwloc_src_url: "https://download.open-mpi.org/release/hwloc/{{ hwloc_tag }}/hwlo
 hwloc_install_prefix: /opt/deepops/hwloc
 hwloc_configure: "./configure --prefix={{ hwloc_install_prefix }} --enable-static --disable-cairo --disable-libxml2 --enable-netloc --enable-plugins"
 hwloc_force_rebuild: no
+# sha256 of the tarball; empty skips the check (kosmos)
+hwloc_src_sha256: ""
 
 slurm_include_pmix: yes
 pmix_version: 3.2.3
@@ -113,3 +126,5 @@ pmix_src_url: "https://github.com/openpmix/openpmix/releases/download/v{{ pmix_v
 pmix_install_prefix: /opt/deepops/pmix
 pmix_configure: "./configure --prefix={{ pmix_install_prefix }} --with-hwloc={{ hwloc_install_prefix }}"
 pmix_force_rebuild: no
+# sha256 of the tarball; empty skips the check (kosmos)
+pmix_src_sha256: ""

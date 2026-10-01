@@ -25,11 +25,6 @@ herakles            ansible_host=herakles
 # CPU nodes
 gaia                ansible_host=gaia
 
-# RTX2080Ti small nodes
-# plato             ansible_host=plato               Phased out
-# schrodinger       ansible_host=schrodinger         Phased out
-# carlos            ansible_host=carlos.rhpc.nki.nl       Phased out 
-
 # RTX2080Ti large node
 alanturing          ansible_host=alanturing
 hamilton            ansible_host=hamilton
@@ -37,8 +32,9 @@ hamilton            ansible_host=hamilton
 # RTX8000 nodes
 roentgen            ansible_host=roentgen
 
-# VMs/controller
+# VMs: controller and login node
 atlas               ansible_host=atlas
+kosmos              ansible_host=kosmos
 
 # Storage
 # rhea              ansible_host=rhea
@@ -57,10 +53,7 @@ aristarchus
 alanturing
 herakles
 hamilton
-# roentgen  
-# plato
-# schrodinger
-# carlos
+# roentgen
 
 
 [mount-scratch]
@@ -83,11 +76,8 @@ kosmos
 aristarchus
 ptolemaeus
 galileo
-# carlos
 euctemon
 eudoxus
-# plato
-# schrodinger
 alanturing
 roentgen
 hamilton
@@ -113,11 +103,6 @@ ptolemaeus
 [partition_rtx2080ti]
 alanturing
 hamilton
-
-[partition_rtx2080ti_sm]
-# carlos                                                    Phased out
-# plato
-# schrodinger
 
 [partition_rtx8000]
 roentgen

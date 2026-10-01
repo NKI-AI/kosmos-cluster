@@ -1,0 +1,11 @@
+---
+# get_url with a checksum leaves a matching file alone and replaces any
+# other version (e.g. a hand-installed one).
+- name: Install nodestat
+  get_url:
+    url: "{{ nodestat_url }}"
+    dest: "{{ nodestat_dest }}"
+    checksum: "{{ ('sha256:' ~ nodestat_sha256) if nodestat_sha256 else omit }}"
+    owner: root
+    group: root
+    mode: "0755"

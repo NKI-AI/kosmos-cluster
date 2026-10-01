@@ -3,5 +3,9 @@ set -ex
 
 command -v nvidia-smi || exit 0
 
-/etc/slurm/shared/bin/set_gpu_power_levels.sh max
-/etc/slurm/shared/bin/set_gpu_clocks.sh max
+# kosmos: best effort. GeForce cards (RTX 2080 Ti) refuse some of these
+# settings, and a failing prolog drains the node and requeues the job.
+/etc/slurm/shared/bin/set_gpu_power_levels.sh max ||
+    logger -s -t slurm-prolog "Could not set the GPU power limits to max; continuing"
+/etc/slurm/shared/bin/set_gpu_clocks.sh max ||
+    logger -s -t slurm-prolog "Could not set the GPU clocks to max; continuing"

@@ -1,7 +1,8 @@
 # GPU inventory and NVIDIA driver choice
 
 Surveyed 2026-09-29 from kosmos over ssh (`lspci -n`, `nvidia-smi`,
-`nvidia-smi topo -m`, `dpkg`), before the clean reinstall on Ubuntu 26.04.
+`nvidia-smi topo -m`, `dpkg`), before the clean reinstall (decided 2026-09-30: Ubuntu 24.04.5 with the
+HWE 7.0 kernel, not 26.04).
 All nodes then ran Ubuntu 22.04 (kernel 5.15), Secure Boot off, the
 proprietary (non-open) kernel modules from Ubuntu's `-server` packages, with
 the driver, DCGM and container toolkit packages on `apt-mark hold`.
@@ -30,11 +31,14 @@ names: Ubuntu 22.04's `lspci` shows the H100 as "Device [10de:2330]".
 
 ## Driver branch: 580 everywhere
 
-Ubuntu 26.04's archive has two real server branches, 580 (580.178.04) and
-595 (595.91.07). `nvidia-headless-{535,550,570}-server` are transitional
-packages that install 580, and `590` installs 595. Checked against the
-`Modaliases` of `nvidia-driver-{580,595}-server` in resolute-updates: both
-list every GPU above; only 580 lists the P6000.
+The branch was chosen while the reinstall still targeted Ubuntu 26.04, whose
+archive has two real server branches, 580 (580.178.04) and 595 (595.91.07);
+the `Modaliases` of both list every GPU above. The target is now Ubuntu
+24.04: noble-updates carries `nvidia-headless-580-server` and
+`nvidia-fabricmanager-580` at the same 580.178.04 (checked 2026-09-30 on
+packages.ubuntu.com). The package is built by DKMS against the running
+kernel, so `playbooks/generic/kernel.yml` installs the HWE kernel with its
+headers before the driver.
 
 580 was chosen (2026-09-29): NVIDIA's long-term support branch, and CUDA
 13.x applications run on drivers >= 580 under minor version compatibility
@@ -60,8 +64,9 @@ and DCGM package names follow it.
   yet initialized". The PCIe A100 and A6000 nodes use NVLink bridges and
   need no fabric manager.
 - **DCGM:** `datacenter-gpu-manager-4-cuda13` (DCGM 4 for a CUDA 13
-  driver). The role's default `datacenter-gpu-manager` is DCGM 3, which
-  NVIDIA's ubuntu2604 repository does not carry.
+  driver). The role's default `datacenter-gpu-manager` is DCGM 3. NVIDIA's
+  ubuntu2404 repository carries DCGM 4.7 (checked 2026-09-30); the role
+  picks the repository from the OS version.
 - **Open kernel modules:** off (`nvidia_driver_ubuntu_use_open_kernel_modules:
   false`), as on 22.04. Every GPU above supports them; NVIDIA makes them the
   default for Turing and newer, and Blackwell GPUs require them.

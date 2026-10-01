@@ -2,6 +2,10 @@
 # ansible_local for every slurm-node (slurm.conf NodeName list).
 # setup: defaults to all even with ansible.cfg min; local skips mounts.
 # Always refresh so the 24 h cache does not freeze RealMemory.
+# kosmos: with -e slurm_nodes_allow_unreachable=true, a node that is
+# unreachable (e.g. being reinstalled) does not abort the play; it is listed
+# in slurm_nodes_unreachable and slurm.conf leaves it out until a later run
+# reaches it (see the NodeName loop in slurm.conf). Without it the play stops.
 - name: Gather ansible_local from all slurm-node hosts
   setup:
     gather_subset:
@@ -14,3 +18,54 @@
   delegate_facts: true
   run_once: true
   loop: "{{ groups['slurm-node'] }}"
+  # Both are needed for the play to go on past an unreachable delegate
+  # (tested with ansible-core 2.17); real failures are caught below.
+  ignore_unreachable: true
+  ignore_errors: true
+  register: slurm_nodes_gathered
+
+- name: Fail on slurm-node hosts that were reached but whose facts failed
+  assert:
+    that: slurm_nodes_failed | length == 0
+    fail_msg: "ansible_local failed on: {{ slurm_nodes_failed | join(', ') }}"
+    quiet: true
+  vars:
+    slurm_nodes_failed: "{{ slurm_nodes_gathered.results | rejectattr('unreachable', 'defined') | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='item') | list }}"
+  run_once: true
+
+# delegate_facts on the loop above keeps nothing once any item is
+# unreachable (ansible-core 2.17), so store each reached node's facts here.
+- name: Store ansible_local of the slurm-node hosts that were reached
+  set_fact:
+    ansible_local: "{{ item.ansible_facts.ansible_local }}"
+  delegate_to: "{{ item.item }}"
+  delegate_facts: true
+  loop: "{{ slurm_nodes_gathered.results | rejectattr('unreachable', 'defined') | selectattr('ansible_facts', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  run_once: true
+
+- name: Record the slurm-node hosts that could not be reached
+  set_fact:
+    slurm_nodes_unreachable: "{{ slurm_nodes_gathered.results | selectattr('unreachable', 'defined') | selectattr('unreachable') | map(attribute='item') | list }}"
+  run_once: true
+
+- name: Slurm nodes left out of slurm.conf (unreachable)
+  debug:
+    msg: "{{ slurm_nodes_unreachable }}"
+  run_once: true
+  when: slurm_nodes_unreachable | length > 0
+
+# Leaving a node out of slurm.conf on a running cluster kills its jobs and
+# fails the pending jobs of a partition that disappears with it (slurmctld
+# restarts after the write). Only while nodes come back one by one
+# (reinstall) is that wanted: -e slurm_nodes_allow_unreachable=true.
+- name: Stop when a slurm-node host is unreachable
+  assert:
+    that: slurm_nodes_unreachable | length == 0 or slurm_nodes_allow_unreachable | default(false) | bool
+    fail_msg: >-
+      Unreachable: {{ slurm_nodes_unreachable | join(', ') }}. slurm.conf would drop them and
+      slurmctld would fail their jobs. Bring them back, or pass
+      -e slurm_nodes_allow_unreachable=true when that is intended (reinstall batches).
+    quiet: true
+  run_once: true

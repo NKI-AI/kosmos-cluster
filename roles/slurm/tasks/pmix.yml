@@ -85,15 +85,26 @@
     mode: "0755"
   when: pmix_build
 
+# kosmos: download to a file first so the tarball's sha256 can be checked
+# (pmix_src_sha256), then unpack it; upstream unpacks straight from the URL.
 - name: download pmix source
+  get_url:
+    url: "{{ pmix_src_url }}"
+    dest: "{{ pmix_build_dir | dirname }}/{{ pmix_src_url | basename }}"
+    checksum: "{{ ('sha256:' ~ pmix_src_sha256) if pmix_src_sha256 else omit }}"
+    mode: "0644"
+  environment: "{{ proxy_env if proxy_env is defined else {} }}"
+  when: pmix_build
+
+# Not in check mode: get_url does not write the file there.
+- name: unpack pmix source
   unarchive:
-    src: "{{ pmix_src_url }}"
+    src: "{{ pmix_build_dir | dirname }}/{{ pmix_src_url | basename }}"
     remote_src: yes
     dest: "{{ pmix_build_dir }}"
     extra_opts:
       - --strip-components=1
-  environment: "{{ proxy_env if proxy_env is defined else {} }}"
-  when: pmix_build
+  when: pmix_build and not ansible_check_mode
 
 - name: clean pmix src dir
   command: make distclean

@@ -77,15 +77,26 @@
     mode: "0755"
   when: hwloc_build
 
+# kosmos: download to a file first so the tarball's sha256 can be checked
+# (hwloc_src_sha256), then unpack it; upstream unpacks straight from the URL.
 - name: download hwloc source
+  get_url:
+    url: "{{ hwloc_src_url }}"
+    dest: "{{ hwloc_build_dir | dirname }}/{{ hwloc_src_url | basename }}"
+    checksum: "{{ ('sha256:' ~ hwloc_src_sha256) if hwloc_src_sha256 else omit }}"
+    mode: "0644"
+  environment: "{{ proxy_env if proxy_env is defined else {} }}"
+  when: hwloc_build
+
+# Not in check mode: get_url does not write the file there.
+- name: unpack hwloc source
   unarchive:
-    src: "{{ hwloc_src_url }}"
+    src: "{{ hwloc_build_dir | dirname }}/{{ hwloc_src_url | basename }}"
     remote_src: yes
     dest: "{{ hwloc_build_dir }}"
     extra_opts:
       - --strip-components=1
-  environment: "{{ proxy_env if proxy_env is defined else {} }}"
-  when: hwloc_build
+  when: hwloc_build and not ansible_check_mode
 
 - name: clean hwloc src dir
   command: make distclean

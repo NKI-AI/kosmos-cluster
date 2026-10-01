@@ -57,7 +57,10 @@ software_extra_packages:
   - vim
   - wget
   - build-essential
-  - linux-tools-generic
+  # kosmos: follows the HWE kernel (kernel.yml), not the GA 6.8 one. Only on
+  # the HWE release: 22.04 has no -hwe-24.04 package, and apt fails on an
+  # unknown name even in --check.
+  - "linux-tools-generic{{ ('-hwe-' ~ kernel_hwe_release) if (kernel_hwe | bool and ansible_distribution_version == kernel_hwe_release) else '' }}"
   - zsh
   - ncdu
   - nfs-common
@@ -65,6 +68,22 @@ software_extra_packages:
 #  - "{{ 'linux-headers-' + ansible_kernel }}"
 #software_remove_packages:
 #  - popularity-contest
+
+# kosmos: kernel and kernel command line
+# Playbook: generic/kernel.yml (also imported by slurm-cluster.yml)
+# Ubuntu HWE kernel for this release: on 24.04 (from 24.04.5) that is 7.0.
+# Installed with its headers (the NVIDIA driver is built by DKMS); the GA
+# kernel stays installed as the grub fallback.
+kernel_hwe: true
+kernel_hwe_release: "24.04"
+# Kernel command line (GRUB_CMDLINE_LINUX). pci=realloc=off on nodes whose
+# gpus fact is non-zero: keeps the firmware's PCI BAR layout, so the kernel's
+# automatic resource reallocation cannot leave a GPU without its large BAR.
+# The GPU nodes ran with it on 22.04 (hand-edited grub). Per-host additions
+# go in kernel_cmdline_extra (host_vars).
+kernel_cmdline_gpu: "pci=realloc=off"
+kernel_cmdline_extra: ""
+kernel_reboot_timeout: 1800
 
 
 ################################################################################
@@ -142,8 +161,9 @@ gpu_clock_lock: "1507,1507"
 nvidia_driver_force_install: false
 # Default NVIDIA driver branch for generic host driver installs.
 # kosmos: one branch for every GPU node. 580 is NVIDIA's long-term support
-# branch and drives every GPU in nvidia_gpu_architectures below; on Ubuntu
-# 26.04 only 580 and 595 are real server branches (535/550/570 install 580).
+# branch and drives every GPU in nvidia_gpu_architectures below. Ubuntu
+# 24.04 noble-updates carries nvidia-headless-580-server and
+# nvidia-fabricmanager-580 580.178.04 (checked 2026-09-30).
 # See docs/kosmos/gpu-inventory.md.
 nvidia_driver_branch: "580"
 # Set true on Ubuntu systems that require NVIDIA open kernel modules.
@@ -226,19 +246,6 @@ enroot_environ_config_files_dgx:
     content: |
       OMPI_MCA_btl_tcp_if_exclude=lo,docker0,ib0,ib1,ib2,ib3
 
-# Singularity configuration
-# Playbook: singularity, slurm-cluster
-# Singularity target version
-# set an alternate singularity version here;
-# see roles/singularity_wrapper/defaults/main.yml for default
-# singularity_version:
-singularity_conf_path: "/etc/singularity/singularity.conf"
-bind_paths: []
-  # example:
-  #- /mnt/shared
-golang_install_dir: '/opt/go/{{ golang_version }}'
-golang_gopath: /opt/go/packages
-
 ################################################################################
 # AUTH                                                                         #
 ################################################################################
@@ -303,10 +310,11 @@ maas_python_reqs:
 # NVIDIA Datacenter GPU Manager                                                #
 ################################################################################
 install_dcgm: true
-# kosmos: DCGM 4. The role default "datacenter-gpu-manager" is DCGM 3, which
-# NVIDIA's ubuntu2604 repo does not carry. The -cudaNN package must match the
-# driver's CUDA major version: 13 for the 580 branch and newer. Nodes that
-# still hold DCGM 3 (the 22.04 install) will refuse the switch.
+# kosmos: DCGM 4 (the role default "datacenter-gpu-manager" is DCGM 3). NVIDIA's
+# ubuntu2404 repo carries datacenter-gpu-manager-4-cuda13 4.7 (checked
+# 2026-09-30); the role picks the repo from the OS version. The -cudaNN
+# package must match the driver's CUDA major version: 13 for the 580 branch
+# and newer.
 dcgm_pkg_name: "datacenter-gpu-manager-4-cuda{{ '13' if (nvidia_driver_branch | int) >= 580 else '12' }}"
 
 ################################################################################

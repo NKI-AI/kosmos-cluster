@@ -1,5 +1,6 @@
 # ansible
 *.retry
+/.ansible/
 
 # misc.
 .*.swp

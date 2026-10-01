@@ -3,10 +3,28 @@
 ################################################################################
 # Slurm job scheduler configuration
 # Playbook: slurm, slurm-cluster, slurm-perf, slurm-perf-cluster, slurm-validation
-# kosmos: pin the Slurm version that runs on the cluster. Upstream 26.07
-# defaults to 26.05.x; Slurm only supports upgrading two major versions at a
-# time, so a Slurm upgrade is a separate project (see docs/kosmos/porting-notes.md).
-slurm_version: "23.02.4"
+# kosmos: pin the Slurm version that runs on the cluster. 26.05.4 was
+# installed fresh on the clean Ubuntu 24.04 reinstall (maintenance from
+# 2026-10-05, new accounting database), not upgraded from 23.02. A later bump
+# is an upgrade: at most two major versions per step, slurmdbd first, then
+# slurmctld, then the nodes; read SchedMD's upgrade notes first.
+slurm_version: "26.05.4"
+# kosmos: sha256 of slurm-{{ slurm_version }}.tar.bz2, checked by the download
+# in roles/slurm/tasks/build.yml. Computed 2026-09-30 from download.schedmd.com;
+# matches SchedMD's GitHub release digest. Update together with slurm_version.
+slurm_src_sha256: "035f4b193d4de979ba5381beca206a50b6b886b2793b06f68a1ce7e67022b06a"
+# kosmos: the role's hwloc 2.5.0 is in the 2.5.0-2.7.0 range SchedMD reports
+# slurmd segfaults with. 2.12.2 is the latest bugfix release of the 2.12 line
+# (2.13-2.15 are newer feature lines); Ubuntu 24.04 itself ships 2.10.
+hwloc_version: 2.12.2
+# kosmos: sha256 of the hwloc and PMIx tarballs, checked by the downloads in
+# roles/slurm/tasks/{hwloc,pmix}.yml. Computed 2026-10-01; hwloc's matches
+# the sha256 on open-mpi.org, PMIx's tarball matches the sha1 in the v3.2.3
+# release notes. Update each together with its version. pmix_version is the
+# role default, pinned here so it cannot change under its checksum.
+hwloc_src_sha256: "ff7d309fdff7ceddfe15c1e79eaff25f3126a134f29f44d4e85571f187a6bab8"
+pmix_version: 3.2.3
+pmix_src_sha256: "9b835f23c2f94a193c14012ee68b3657a61c568598cdd1212a3716b32d41a135"
 
 # Slurm 25.11 and newer can propagate an ordinary slurmctld restart as a
 # reconfiguration request to every slurmd and sackd. Keep this version-gated
@@ -20,6 +38,7 @@ slurm_build_dir: "{{ deepops_dir }}/build/slurm"
 hwloc_build_dir: "{{ deepops_dir }}/build/hwloc"
 pmix_build_dir: "{{ deepops_dir }}/build/pmix"
 nhc_build_dir: "{{ deepops_dir }}/build/nhc"
+slurm_exporter_build_dir: "{{ deepops_dir }}/build/slurm-exporter"
 nvidia_dcgm_container_config_dir: "{{ deepops_dir }}/nvidia-dcgm-exporter"
 nginx_docker_cache_mirror_path: "{{ deepops_dir }}/nginx-docker-cache/mirror"
 nginx_docker_cache_ca_path: "{{ deepops_dir }}/nginx-docker-cache/ca"
@@ -33,8 +52,13 @@ slurm_manage_gpus: true
 
 slurm_cluster_name: kosmos
 
-# See docs/kosmos/slurm-secrets.md
-kosmos_slurm_secrets_file: "{{ lookup('env', 'KOSMOS_SLURM_SECRETS_FILE') | mandatory }}"
+# kosmos: secrets are not in git. See docs/kosmos/slurm-secrets.md.
+# /etc/profile.d/kosmos-slurm-secrets.sh on teuwen-ansible exports
+# KOSMOS_SLURM_SECRETS_FILE at login; the file is YAML with slurm_password
+# (seeds the munge key) and slurm_db_password (slurmdbd's MariaDB password).
+# Read on the Ansible node only when a task needs them. lookup('env') returns
+# "" for an unset variable, which mandatory lets through, hence the undef.
+kosmos_slurm_secrets_file: "{{ lookup('env', 'KOSMOS_SLURM_SECRETS_FILE') or undef(hint='KOSMOS_SLURM_SECRETS_FILE is not set: open a new login shell on teuwen-ansible (/etc/profile.d/kosmos-slurm-secrets.sh)') }}"
 slurm_password: "{{ (lookup('file', kosmos_slurm_secrets_file) | from_yaml).slurm_password | mandatory }}"
 slurm_db_password: "{{ (lookup('file', kosmos_slurm_secrets_file) | from_yaml).slurm_db_password | mandatory }}"
 
@@ -70,12 +94,6 @@ partition_settings:
     slurm_allow_qos: rtx_qos,eight_rtx_qos
     slurm_max_job_timelimit: 10080
     default: true
-  rtx2080ti_sm:
-    slurm_def_mem_per_cpu: 3700
-    slurm_def_cpu_per_gpu: 12
-    slurm_allow_qos: rtx_qos
-    slurm_max_job_timelimit: 20160
-    default: false
   rtx8000:
     slurm_def_mem_per_cpu: 6000
     slurm_def_cpu_per_gpu: 10
@@ -87,6 +105,36 @@ partition_settings:
     slurm_allow_qos: cpu_qos,cpu_128_qos
     slurm_max_job_timelimit: 30-00
     default: false
+
+# kosmos: QOS created by roles/slurm/tasks/controller.yml ("create QOS", then
+# "set QOS limits": sacctmgr modify qos where name=<key> set <k>=<v> ...).
+# Every name in a partition's slurm_allow_qos must be here. Keys and values
+# are sacctmgr's; an empty dict only creates the QOS. Copied from the live
+# cluster (sacctmgr -P show qos on atlas, 2026-09-30): everything else is at
+# Slurm's defaults there. "normal" is created by Slurm itself.
+# MaxTRESPerUser = per-user limit over all running jobs; MaxTRES = per job;
+# GrpTRES = all jobs in the QOS together.
+slurm_qos:
+  a100_qos: {MaxTRESPerUser: gres/gpu=2}
+  four_a100_qos: {MaxTRESPerUser: gres/gpu=4}
+  eight_a100_qos: {MaxTRESPerUser: gres/gpu=8}
+  h100_qos: {MaxTRESPerUser: gres/gpu=1}
+  four_h100_qos: {MaxTRESPerUser: gres/gpu=4}
+  eight_h100_qos: {MaxTRESPerUser: gres/gpu=8}
+  a6000_qos: {MaxTRESPerUser: gres/gpu=2}
+  four_a6000_qos: {MaxTRESPerUser: gres/gpu=4}
+  eight_a6000_qos: {MaxTRESPerUser: gres/gpu=8}
+  rtx_qos: {MaxTRESPerUser: gres/gpu=4}
+  # no limits on the live cluster either
+  eight_rtx_qos: {}
+  cpu_qos: {GrpTRES: cpu=256, MaxTRESPerUser: cpu=32}
+  cpu_128_qos: {GrpTRES: cpu=256, MaxTRESPerUser: cpu=128}
+  # Not allowed by any partition, but they exist on the live cluster and
+  # associations in the sacctmgr dump may reference them (sacctmgr load
+  # fails on an unknown QOS).
+  tengpu: {MaxTRESPerUser: gres/gpu=10}
+  burst: {MaxTRES: gres/gpu=32}
+  high_gpu_limit: {MaxTRESPerUser: gres/gpu=32}
 
 # Auto-detect GPUs using NVML
 # See docs/slurm-cluster/nvml.md for details.
@@ -146,9 +194,6 @@ dns_late: false
 slurm_configure_etc_hosts: no
 slurm_cluster_install_cuda: no
 slurm_cluster_install_nvidia_driver: yes
-# kosmos: Singularity is replaced by Apptainer (playbooks/container/apptainer.yml);
-# upstream's singularity playbook is broken in 26.07 anyway.
-slurm_cluster_install_singularity: no
 # kosmos: Apptainer on the compute nodes (slurm-node; the hostlist is in
 # playbooks/slurm-cluster.yml). One version everywhere: roles/apptainer
 # installs the GitHub release .deb and downgrades a newer one. 1.5.4
@@ -157,6 +202,15 @@ slurm_cluster_install_singularity: no
 slurm_cluster_install_apptainer: yes
 apptainer_version: "1.5.4"
 apptainer_sha256: "281cf9bd68f16b6f7c34a3a94d77668bc327b9c09db0412ce7890162734a97f7"
+# kosmos: nodestat (roles/nodestat) on slurm-node and slurm-login. Pinned to
+# a commit; the checksum is the sha256 of nodestat.py at that commit. 0.16
+# plus our fixes (array jobs, -g, node states), from branch
+# fix-array-jobs-gres-used of our fork until edupooch/nodestat merges the
+# pull request; then drop nodestat_repo and pin the upstream commit.
+slurm_cluster_install_nodestat: yes
+nodestat_repo: "kosmasgal/nodestat"
+nodestat_version: "65281b195a694152adb03cb11733a3a95bf38e57"
+nodestat_sha256: "9686ac2bb7c7a577e54d38cd1bf603617d5c70bb7a9ca6ab668ca4448d0e2a7d"
 
 ################################################################################
 # NFS                                                                          #
@@ -191,6 +245,10 @@ nfs_client_group: "slurm-master[1:],slurm-node"
 
 # Flags for sharing slurm.conf among compute and control nodes
 slurm_conf_symlink: true
+# kosmos: where the shared slurm.conf lives (the slurm role's default, set
+# here so other roles see it: the Slurm exporter container mounts it, because
+# /etc/slurm/slurm.conf on atlas is a symlink into it).
+slurmctl_config_dir: /sw/.slurm
 
 # Upstream's slurm.yml installs the public key of whoever runs the playbook into
 # root's authorized_keys on every compute node. Not needed on kosmos: ssh uses
@@ -259,7 +317,7 @@ openmpi_configure: "./configure --prefix={{ openmpi_install_prefix }} --disable-
 # Open OnDemand                                                                #
 ################################################################################
 install_open_ondemand: no
-# OOD Linux-host adapter requires `slurm_cluster_install_singularity` to be true
+# OOD Linux-host adapter needs a container runtime on the nodes (Apptainer here)
 ood_install_linuxhost_adapter: no
 
 servername: '{{ ansible_fqdn }}'

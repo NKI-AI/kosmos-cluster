@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -ex
 
-if grep -q -w "$SLURM_JOB_USER" /etc/slurm/localusers.backup ; then
+# kosmos: exact whole-line matches. "grep -w" and sed "/<user>/d" treated
+# the name as a regex and a substring: a job user "ro" deleted "root", and
+# a user "a" every line containing an a.
+if grep -qxF -- "$SLURM_JOB_USER" /etc/slurm/localusers.backup ; then
     exit 0  # don't revoke access for these users
 fi
 
-sed -i "/${SLURM_JOB_USER}/d" /etc/localusers
+# rewrite in place (cat >) so the file keeps its owner and mode
+remaining=$(awk -v u="$SLURM_JOB_USER" '$0 != u' /etc/localusers)
+printf '%s\n' "$remaining" | sed '/^$/d' > /etc/localusers

@@ -27,6 +27,12 @@
   import_playbook: generic/chrony-client.yml
   when: chrony_install|default(true)
 
+# kosmos: HWE kernel, headers and kernel command line before the NVIDIA
+# driver (DKMS) and before the Slurm role's grub task.
+- name: Kernel and kernel command line
+  import_playbook: generic/kernel.yml
+  when: kernel_manage|default(true)
+
 - name: Set up a local cluster container registry
   import_playbook: container/standalone-container-registry.yml
   vars:
@@ -108,6 +114,10 @@
 - name: Install nvtop (kosmos)
   import_playbook: slurm-cluster/nvtop.yml
 
+- name: Install nodestat (kosmos)
+  import_playbook: slurm-cluster/nodestat.yml
+  when: slurm_cluster_install_nodestat|default(false)
+
 - name: Install the NVIDIA HPC SDK
   import_playbook: nvidia-software/nvidia-hpc-sdk.yml
   vars:
@@ -157,10 +167,6 @@
   vars:
     hostlist: "{{ rsyslog_client_group | default('slurm-node') }}"
   when: slurm_enable_rsyslog_client|default(true)
-
-- name: Install Singularity
-  import_playbook: container/singularity.yml
-  when: slurm_cluster_install_singularity|default(true)
 
 - name: Install Apptainer (kosmos)
   import_playbook: container/apptainer.yml

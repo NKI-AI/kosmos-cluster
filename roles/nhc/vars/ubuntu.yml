@@ -1,3 +1,9 @@
 ---
 nhc_build_deps:
   - build-essential
+
+# OpenSSH rewrites its process title, so every sshd carries argv[0] "sshd:".
+# check_ps_service matches against that first token, so the daemon name it is
+# given must carry the colon too. Set here rather than per release, so new
+# Ubuntu versions do not silently fall back to the colonless role default.
+nhc_ssh_daemon: "sshd:"

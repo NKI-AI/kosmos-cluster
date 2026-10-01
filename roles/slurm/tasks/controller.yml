@@ -45,6 +45,50 @@
     daemon-reload: yes
   when: ansible_os_family == "RedHat"
 
+# kosmos: SchedMD's MariaDB settings for slurmdbd
+# (https://slurm.schedmd.com/accounting.html), applied before slurmdbd first
+# creates its tables. Memory from /proc/meminfo: implicit fact gathering is
+# the min subset, which has no memory facts.
+- name: read total memory (MB) for the InnoDB buffer pool
+  command: awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo
+  register: slurm_mariadb_memtotal
+  changed_when: false
+  check_mode: false
+  when:
+  - ansible_os_family == "Debian"
+  - slurm_mariadb_tune | bool
+
+- name: write the MariaDB tuning drop-in for slurmdbd
+  vars:
+    buffer_pool_mb: "{{ slurm_mariadb_buffer_pool_mb | default([(slurm_mariadb_memtotal.stdout | int * 0.25) | int, 4096] | min) }}"
+  copy:
+    dest: /etc/mysql/mariadb.conf.d/99-slurmdbd.cnf
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/slurm/tasks/controller.yml, kosmos).
+      # SchedMD recommendations for slurmdbd, https://slurm.schedmd.com/accounting.html
+      [mysqld]
+      innodb_buffer_pool_size = {{ buffer_pool_mb }}M
+      innodb_log_file_size = {{ (buffer_pool_mb | int / 4) | int }}M
+      innodb_lock_wait_timeout = {{ slurm_mariadb_lock_wait_timeout }}
+      max_allowed_packet = {{ slurm_mariadb_max_allowed_packet }}
+
+      [mariadbd]
+      # slurmdbd cannot recover from the rollbacks this causes (MariaDB >= 10.6.18;
+      # loose- so older servers ignore the unknown option).
+      loose-innodb_snapshot_isolation = OFF
+  register: slurm_mariadb_dropin
+  when:
+  - ansible_os_family == "Debian"
+  - slurm_mariadb_tune | bool
+
+- name: restart mariadb to apply the tuning
+  systemd:
+    name: mariadb
+    state: restarted
+    enabled: yes
+  when: slurm_mariadb_dropin is changed
+
 - name: setup slurm db user
   mysql_user:
     name: "{{ slurm_db_username }}"
@@ -122,6 +166,8 @@
     dest: "{{ slurm_config_dir }}/slurmdbd.conf"
     owner: "{{ slurm_username }}"
     mode: 0600
+  # kosmos: StoragePass is slurm_db_password; keep it out of --diff
+  diff: false
   notify:
   - restart slurmdbd
   tags:
@@ -160,6 +206,41 @@
     'Nothing new added' not in create_account_result.stdout and
     'Nothing added' not in create_account_result.stdout and
     'Already existing' not in create_account_result.stdout
+  environment:
+    PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
+
+# kosmos: QOS from site config (slurm_qos), created before users/associations
+# and before slurmctld starts: partitions list them in AllowQos and
+# AccountingStorageEnforce includes qos. Their limits are set after slurmctld
+# has started (end of this file).
+- name: every QOS a partition allows is defined in slurm_qos
+  vars:
+    allowed_qos: >-
+      {{ partition_settings | default({}) | dict2items
+         | map(attribute='value.slurm_allow_qos') | select('defined')
+         | map('split', ',') | flatten | unique }}
+  assert:
+    that: allowed_qos | difference(slurm_qos | default({}) | list) | length == 0
+    fail_msg: "QOS in AllowQos but not in slurm_qos: {{ allowed_qos | difference(slurm_qos | default({}) | list) | join(', ') }}"
+    quiet: true
+  run_once: true
+
+- name: create QOS
+  command: sacctmgr -i add qos {{ item.key }}
+  loop: "{{ slurm_qos | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: create_qos_result
+  failed_when: >
+    create_qos_result.rc != 0 and
+    'Nothing new added' not in create_qos_result.stdout and
+    'Nothing added' not in create_qos_result.stdout and
+    'Already existing' not in create_qos_result.stdout
+  changed_when: >
+    'Nothing new added' not in create_qos_result.stdout and
+    'Nothing added' not in create_qos_result.stdout and
+    'Already existing' not in create_qos_result.stdout
+  run_once: true
   environment:
     PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
 
@@ -202,3 +283,35 @@
     state: restarted
     enabled: yes
     daemon-reload: yes
+
+# kosmos: QOS limits (slurm_qos). A new accounting database knows only the
+# built-in TRES; gres/gpu is added when slurmctld first starts with
+# AccountingStorageTRES=gres/gpu, and sacctmgr rejects a gres/gpu limit before
+# that. So wait for it after the restart above. Not in check mode: the
+# command does not run there, so the wait would always time out.
+- name: wait until slurmctld has registered the gres/gpu TRES
+  command: sacctmgr -nP show tres where type=gres name=gpu format=Type,Name
+  register: slurm_gpu_tres
+  until: "'gres|gpu' in slurm_gpu_tres.stdout"
+  retries: 30
+  delay: 5
+  changed_when: false
+  run_once: true
+  when: slurm_manage_gpus | bool and not ansible_check_mode
+  environment:
+    PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
+
+# sacctmgr prints "Modified qos" whenever the name matches, also when nothing
+# changed, so this cannot report changes: it reapplies the limits every run.
+# A limit taken out of slurm_qos is not cleared (set it to -1 instead).
+- name: set QOS limits
+  command: >-
+    sacctmgr -i modify qos where name={{ item.key }} set
+    {% for k, v in item.value.items() %}{{ k }}={{ v }} {% endfor %}
+  loop: "{{ slurm_qos | default({}) | dict2items | selectattr('value') | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  changed_when: false
+  run_once: true
+  environment:
+    PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'

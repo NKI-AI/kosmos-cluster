@@ -1,0 +1,11 @@
+---
+# kosmos: nodestat (https://github.com/edupooch/nodestat), a one-file Python
+# script (standard library only) that shows free CPUs, GPUs and memory per
+# node and the jobs on them. Installed as a plain file, not with pip: Ubuntu
+# 24.04 refuses pip installs into the system Python. The site pin (commit
+# and checksum) is in config/group_vars/slurm-cluster.yml.
+nodestat_repo: "edupooch/nodestat"
+nodestat_version: "4bf9b5f37ae83e9949966f1beee618e048aff728"
+nodestat_sha256: ""
+nodestat_url: "https://raw.githubusercontent.com/{{ nodestat_repo }}/{{ nodestat_version }}/nodestat.py"
+nodestat_dest: /usr/local/bin/nodestat
