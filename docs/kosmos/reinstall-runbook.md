@@ -263,14 +263,33 @@ That is harmless; power it off or ignore it.
 1. `ansible-playbook -kK playbooks/slurm-cluster.yml` (without
    `slurm_nodes_allow_unreachable` from now on), then again: converged on
    every host, no unreachable node.
-2. `python3 validate_slurm.py --json` (without `--allow-unavailable-nodes`)
+2. Scratch cross-mounts: every scratch node exports its `/processing` to
+   gaia, which mounts them under `/mnt/processing/<node>`. Not part of
+   `slurm-cluster.yml` (also not on master) and it needs every scratch node
+   up, so once here:
+
+   ```bash
+   ansible-playbook -kK playbooks/slurm-cluster/mount_scratch_disks.yml
+   ```
+
+   Check on gaia: `findmnt -t nfs4 | grep processing` lists one mount per
+   host in `scratch-node`.
+3. `python3 validate_slurm.py --json` (without `--allow-unavailable-nodes`)
    clean, every node idle, `sinfo -R` empty.
-3. `scontrol update nodename=ALL state=resume` if anything is still drained
+4. `scontrol update nodename=ALL state=resume` if anything is still drained
    from testing; send the announcement.
 
-Fallbacks: the GA 6.8 kernel stays installed (the grub menu is hidden: pick
-it from the console, or `grub-reboot`); the driver branch is one variable
-(`nvidia_driver_branch`).
+Fallbacks:
+
+- **Back to the GA 6.8 kernel** on a host (e.g. the driver does not build
+  for 7.0): booting 6.8 once is not enough, because the next run of
+  `kernel.yml` sees a newer series installed and reboots into 7.0 again.
+  Set `kernel_hwe: false` for the host in `config/host_vars/<host>`, then
+  on the host
+  `sudo apt remove linux-generic-hwe-24.04 linux-headers-generic-hwe-24.04 'linux-image-7.0*'`
+  and reboot. 6.8 is then the newest kernel and stays; its headers are
+  still installed, so the driver builds for it on the next run.
+- The driver branch is one variable (`nvidia_driver_branch`).
 
 After go-live, a `slurm-cluster.yml` run reboots a host (`kernel.yml`) when
 it changes the host's kernel command line or finds a newer kernel series
