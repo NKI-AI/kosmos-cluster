@@ -564,6 +564,22 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   (see "Running playbooks from teuwen-ansible").
 - **After go-live, not blocking: configless Slurm.** See "Configless Slurm"
   below.
+- **After go-live, not blocking: Docker and containerd onto supported
+  versions** (decided 2026-10-01). The reinstall keeps the pin of deviation
+  13: Docker 28.3 (28.3.3) and containerd.io 1.6.32, kubespray 2.31's
+  defaults and the newest Docker in its table
+  (`submodules/kubespray/roles/container-engine/docker/vars/ubuntu.yml`).
+  Both are out of support: containerd 1.6 ended 2025-08-23, the Docker 28
+  line ended at 28.5.2; current is Docker 29.8.2, which needs containerd.io
+  >= 2.1.5 (Docker's noble repository, 2026-10-01). Docker only runs the
+  monitoring containers here (jobs use Apptainer/enroot, users have no
+  access to the daemon), so a failed upgrade costs monitoring on one node.
+  To do: test on one node (gaia) with `docker_version: latest` and
+  `docker_containerd_version: latest` (the role's table maps both to the
+  unversioned package, and the role holds the packages after install), or
+  wait for a kubespray bump that lists Docker 29; then pin the result in
+  `config/group_vars/all.yml`. Watch for Docker 29's changed defaults (the
+  containerd image store on fresh installs, a higher minimum API version).
 
 ### Configless Slurm (follow-up after go-live, decided 2026-10-01)
 
