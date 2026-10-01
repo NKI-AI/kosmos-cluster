@@ -30,9 +30,11 @@ Rules for every step:
   its jobs. A node that answers but whose sudo fails also stops the run:
   fix it or power it off.
 - **The first playbook on a reinstalled host runs with `--flush-cache`**
-  (step 2.2): the fact cache (per admin, 24 h) may still hold its 22.04
-  facts. `kernel.yml` also refreshes the OS facts itself, at the start of
-  every `slurm-cluster.yml` run; the flag is the second safeguard.
+  (step 2.2): the fact cache (`/var/tmp/ansible_cache`, shared by all
+  admins, 24 h) may still hold its 22.04 facts. After one admin's run has
+  refreshed a host, the cache holds its 24.04 facts for everyone.
+  `kernel.yml` also refreshes the OS facts itself, at the start of every
+  `slurm-cluster.yml` run; the flag is the second safeguard.
 - A step that fails: fix it on a branch, merge into `deepops-26.07`, pull,
   rerun the same command.
 - A converged rerun reports `changed` only for the Slurm daemon restarts
