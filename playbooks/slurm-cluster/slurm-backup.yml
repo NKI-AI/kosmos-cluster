@@ -104,7 +104,8 @@
     - name: measure the database and state directory
       shell: |
         set -e
-        du -sb {{ slurm_backup_mysql_datadir }} {{ slurm_backup_state_save_location }} | awk '{s+=$1} END {print s}'
+        du -sb {{ slurm_backup_mysql_datadir }} {{ slurm_backup_state_save_location }} \
+          /var/log/slurm /var/log/mysql /var/log/deepops-hosts 2>/dev/null | awk '{s+=$1} END {print s}'
       register: slurm_backup_needed
       changed_when: false
 
@@ -220,6 +221,9 @@
     # kosmos: the whole job history as text, readable without a database
     # (the reinstall starts a new one). After the dump, so a failure here
     # cannot cost the dump; needs slurmdbd, so it starts it again first.
+    # Best effort: one sacct over all years can fail (slurmdbd refuses results
+    # above its size limit). The dump is the backup and the history can be
+    # exported from it later, so a failure only warns and the backup goes on.
     - name: start slurmdbd for the job history export
       systemd:
         name: slurmdbd
@@ -237,12 +241,14 @@
       shell: |
         set -o pipefail
         {{ slurm_install_prefix }}/bin/sacct -a -P -S {{ slurm_backup_sacct_start }} -E now --format=ALL \
-          | gzip -1 > {{ slurm_backup_path }}/sacct-all.txt.gz
+          | gzip -1 > {{ slurm_backup_path }}/sacct-all.txt.gz \
+          || { rm -f {{ slurm_backup_path }}/sacct-all.txt.gz; exit 1; }
       args:
         executable: /bin/bash
       async: 7200
       poll: 15
       changed_when: false
+      failed_when: false
       # skipped when slurmdbd is to be left stopped
       when: slurm_backup_sacct_start | length > 0 and (slurm_backup_start_slurmdbd_after | bool or not slurm_backup_stop_slurmdbd | bool)
 
@@ -268,6 +274,15 @@
         /etc/mysql /etc/ld.so.conf.d/slurm.conf /etc/pam.d/sshd /etc/pam.d/common-session
       register: slurm_backup_etc_tar
       failed_when: slurm_backup_etc_tar.rc not in [0, 1]
+
+    # kosmos: Slurm and MariaDB logs and the compute nodes' logs collected by
+    # rsyslog (deepops-hosts), for looking back after the reinstall.
+    - name: archive the controller logs
+      command: >
+        tar --ignore-failed-read --warning=no-file-changed -czf {{ slurm_backup_path }}/controller-logs.tgz
+        /var/log/slurm /var/log/mysql /var/log/deepops-hosts
+      register: slurm_backup_logs_tar
+      failed_when: slurm_backup_logs_tar.rc not in [0, 1]
 
     - name: keep a plain copy of the shared slurm.conf
       copy:
@@ -333,12 +348,16 @@
         timeout: 600
       when: slurm_backup_stop_slurmdbd | bool and slurm_backup_start_slurmdbd_after | bool
 
+    - name: did the job history export succeed
+      set_fact:
+        slurm_backup_sacct_export_ok: "{{ slurm_backup_sacct_job_export is not skipped and slurm_backup_sacct_job_export.rc | default(1) == 0 }}"
+
     - name: fetch the dump, the text exports and the manifest to the Ansible node
       fetch:
         src: "{{ slurm_backup_path }}/{{ item }}"
         dest: "{{ slurm_backup_fetch_dir }}/{{ inventory_hostname }}/{{ slurm_backup_path | basename }}/"
         flat: yes
-      loop: "{{ slurm_backup_fetch_files + (['sacct-all.txt.gz'] if slurm_backup_sacct_job_export is not skipped else []) }}"
+      loop: "{{ slurm_backup_fetch_files + (['sacct-all.txt.gz'] if slurm_backup_sacct_export_ok | bool else []) }}"
       vars:
         slurm_backup_fetch_files:
           - "{{ slurm_backup_db_name }}.sql.gz"
@@ -362,6 +381,7 @@
           - "Backup of Slurm {{ slurm_installed_version }} written to {{ inventory_hostname }}:{{ slurm_backup_path }}"
           - "slurmdbd was {{ 'stopped for the dump' if slurm_backup_stop_slurmdbd | bool else 'running during the dump (--single-transaction)' }}{{ ' and left stopped' if slurm_backup_stop_slurmdbd | bool and not slurm_backup_start_slurmdbd_after | bool else '' }}"
           - "{{ 'Dump and manifest fetched to ' ~ slurm_backup_fetch_dir ~ '/' ~ inventory_hostname ~ '/' ~ (slurm_backup_path | basename) if slurm_backup_fetch | bool else 'Nothing fetched to the Ansible node (slurm_backup_fetch=false)' }}"
+          - "{{ 'Job history exported to sacct-all.txt.gz' if slurm_backup_sacct_export_ok | bool else ('Job history export skipped' if slurm_backup_sacct_job_export is skipped else 'WARNING: job history export FAILED (' ~ (slurm_backup_sacct_job_export.stderr | default('') | trim | truncate(200)) ~ '); the database dump is complete, export the history from it later') }}"
           - "Keep this directory until the change it protects has soaked."
 
 - name: Back up the installed Slurm files on compute and login nodes

@@ -4,7 +4,6 @@
 # compared with the old ones and nothing hand-made is lost silently.
 #
 #   ansible-playbook -kK docs/kosmos/pre-reinstall-snapshot.yml
-#   ansible-playbook -kK docs/kosmos/pre-reinstall-snapshot.yml -l atlas -e snapshot_prometheus=true
 #
 # Read-only on the hosts except a scratch directory under /var/tmp, which is
 # removed at the end. Output: ~/reinstall-snapshot/<host>/ on the Ansible node
@@ -12,19 +11,18 @@
 # shadow, gshadow, the Kerberos keytab and the ssh host private keys), what
 # was installed by hand under /usr/local and /opt, the kernel command line,
 # package selections and holds, disks, mounts, enabled units, root's crontab,
-# nvidia-smi -q on GPU nodes. On the controller also: Slurm and MariaDB logs,
-# the rsyslog tree of the compute nodes, Grafana's data, and with
-# snapshot_prometheus=true the Prometheus volume (can be large).
+# nvidia-smi -q on GPU nodes. A few MB per host: the Ansible node has little
+# disk. Grafana and Prometheus are not kept (unused, decided 2026-10-01).
 #
-# The Slurm database itself is dumped by playbooks/slurm-cluster/slurm-backup.yml,
-# see docs/kosmos/reinstall-runbook.md step 1.2.
+# The Slurm database and the controller's logs are in the backup of
+# playbooks/slurm-cluster/slurm-backup.yml, see
+# docs/kosmos/reinstall-runbook.md step 1.2.
 - hosts: "{{ hostlist | default('slurm-cluster') }}"
   become: true
   gather_facts: false
   vars:
     snapshot_remote: /var/tmp/reinstall-snapshot
     snapshot_local: "{{ lookup('env', 'HOME') }}/reinstall-snapshot"
-    snapshot_prometheus: false
     snapshot_files:
       - etc.tar.gz
       - info.txt
@@ -63,22 +61,6 @@
         executable: /bin/bash
       changed_when: false
 
-    - name: collect controller data
-      shell: |
-        set -u
-        cd {{ snapshot_remote }}
-        tar -czf controller-logs.tar.gz --ignore-failed-read \
-            /var/log/slurm /var/log/mysql /var/log/deepops-hosts 2>/dev/null || true
-        tar -czf grafana.tar.gz --ignore-failed-read /var/lib/grafana 2>/dev/null || true
-        {% if snapshot_prometheus | bool %}
-        docker run --rm -v deepops_prometheus_metrics:/prometheus:ro -v {{ snapshot_remote }}:/out \
-            busybox tar -czf /out/prometheus.tar.gz -C / prometheus
-        {% endif %}
-      args:
-        executable: /bin/bash
-      changed_when: false
-      when: inventory_hostname in groups['slurm-master']
-
     - name: create the local directory
       file:
         path: "{{ snapshot_local }}/{{ inventory_hostname }}"
@@ -92,10 +74,7 @@
         src: "{{ snapshot_remote }}/{{ item }}"
         dest: "{{ snapshot_local }}/{{ inventory_hostname }}/"
         flat: true
-      loop: >-
-        {{ snapshot_files + (['controller-logs.tar.gz', 'grafana.tar.gz']
-           + (['prometheus.tar.gz'] if snapshot_prometheus | bool else [])
-           if inventory_hostname in groups['slurm-master'] else []) }}
+      loop: "{{ snapshot_files }}"
 
     - name: remove the scratch directory
       file:

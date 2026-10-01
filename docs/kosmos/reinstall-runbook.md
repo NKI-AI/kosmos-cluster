@@ -96,32 +96,53 @@ Rules for every step:
 4. Merge `reinstall-prep` into `deepops-26.07` (pull request). Step 1.2
    needs it: the backup playbook is only on this branch.
 5. Announcement (Daan): section 5 below.
+6. **teuwen-ansible's size.** It is a VM with 2 vCPUs, 2 GB of memory and
+   about 2 GB of free disk (2026-10-01). `ansible.cfg` has `forks = 25`, so a
+   run on all twelve hosts starts twelve Ansible processes at once; the dry
+   runs used five. Ask IT for more memory and CPUs before the maintenance
+   (a resize needs a reboot of the VM). If that does not happen, add `-f 4`
+   to the playbook commands: slower, but within its memory. Free some disk
+   too (`sudo du -xh -d2 / | sort -h | tail`); keep
+   `/opt/kosmos-cluster/env` and `env-26.07`.
 
 ## 1. Before the wipe (cluster drained)
 
 1. Stop new work and let the queue empty (or cancel what is left), on atlas
    with sudo:
    `scontrol update nodename=ALL state=drain reason="reinstall 2026-10-05"`.
-2. **Slurm database, accounts and job history.** First check the room:
-   `df -h ~` on teuwen-ansible against the database size
-   (`sudo du -sh /var/lib/mysql` on atlas). Then:
+2. **Slurm database, accounts, job history and controller logs.** Not via
+   teuwen-ansible (about 2 GB of free disk and 2 GB of memory): the backup
+   stays on atlas, and you copy it into your network home, which is on rhea
+   (`/home`, NFS) and survives the reinstall.
 
    ```bash
-   ansible-playbook -kK -l atlas playbooks/slurm-cluster/slurm-backup.yml -e slurm_backup_stop_slurmdbd=true
+   ansible-playbook -kK -l atlas playbooks/slurm-cluster/slurm-backup.yml \
+     -e slurm_backup_stop_slurmdbd=true -e slurm_backup_fetch=false
    ```
 
-   Stops slurmdbd for a consistent dump, then writes everything to
-   `/var/backups/slurm/<YYYYmmddTHHMMSS>-slurm-23.02.4/` on atlas and fetches
-   the MariaDB dump, `sacctmgr-dump.cfg`, `sacctmgr-qos.txt`,
-   `sacctmgr-assoc.txt`, the job history (`sacct-all.txt.gz`), `etc.tgz`,
-   `scontrol`/`sinfo`/`squeue` output and `SHA256SUMS` to
-   `~/slurm-backups/atlas/<same name>/` on teuwen-ansible. Check there with
-   `sha256sum -c --ignore-missing SHA256SUMS`, then
-   `chmod -R go= ~/slurm-backups` (old munge key, user names). What is not
-   fetched (state directory, the 23.02 binaries) is of no use to the new
-   install and goes with atlas. If the fetch fails (size), copy the
-   directory from atlas with `scp` instead.
-3. **Host snapshot** of all twelve hosts:
+   Stops slurmdbd for a consistent dump and writes everything to
+   `/var/backups/slurm/<YYYYmmddTHHMMSS>-slurm-23.02.4/` on atlas: the
+   MariaDB dump, `sacctmgr-dump.cfg` (loaded again in step 2.4), the QOS and
+   associations as text, the job history (`sacct-all.txt.gz`), the Slurm,
+   MariaDB and rsyslog logs (`controller-logs.tgz`), `etc.tgz`, the state
+   directory, the 23.02 binaries and `SHA256SUMS`. If the job history export
+   fails, the summary says so and the rest of the backup is complete (the
+   history can be exported from the dump later). Then, logged in on atlas as
+   yourself:
+
+   ```bash
+   findmnt /home                      # must show rhea:/project-pool/network_homes
+   d=$(sudo ls /var/backups/slurm | tail -1); echo "$d"
+   mkdir -p -m 700 ~/slurm-backup
+   sudo tar -C /var/backups/slurm -cf - "$d" | tar -xf - -C ~/slurm-backup
+   (cd ~/slurm-backup/"$d" && sha256sum -c SHA256SUMS)
+   ```
+
+   `sudo` reads the root-only backup; the files are written as you, so root
+   squashing on the NFS share does not get in the way. Every line of
+   `sha256sum -c` must say `OK`.
+3. **Host snapshot** of all twelve hosts (a few MB per host, to
+   `~/reinstall-snapshot` on teuwen-ansible):
 
    ```bash
    ansible-playbook -kK docs/kosmos/pre-reinstall-snapshot.yml
@@ -136,8 +157,9 @@ Rules for every step:
    The snapshot also lists what was installed by hand under `/usr/local` and
    `/opt` (`info.txt`): anything there that users need and no playbook
    installs is lost with the wipe.
-4. Copy `~/slurm-backups` and `~/reinstall-snapshot` off teuwen-ansible,
-   to a place the admins agree on that is not being reinstalled.
+4. Copy the snapshot into your network home through any cluster host that
+   is still up, e.g. `scp -r ~/reinstall-snapshot <you>@gaia:`. Later move
+   both directories to wherever the admins agree on.
 5. IT starts installing.
 
 ## 2. Deploy, per batch of nodes IT hands over
@@ -184,13 +206,14 @@ That is harmless; power it off or ignore it.
    reachable nodes that are not deployed yet are left out silently. The
    NVIDIA driver install reboots GPU nodes with a 600 s timeout; if a large
    node (herakles) times out, rerun.
-4. **First batch only, accounting.** From teuwen-ansible:
-   `scp ~/slurm-backups/atlas/<dir>/sacctmgr-dump.cfg atlas:`, then on atlas
-   `sudo sacctmgr load file=sacctmgr-dump.cfg` **without `-i`**: it prints
+4. **First batch only, accounting.** On atlas, as yourself (root cannot
+   read your NFS home, so copy the file to local disk first):
+   `cp ~/slurm-backup/<dir>/sacctmgr-dump.cfg /tmp/`, then
+   `sudo sacctmgr load file=/tmp/sacctmgr-dump.cfg` **without `-i`**: it prints
    what it will add and asks before committing (answer within 30 s, or it
    discards; then rerun). Compare the Account/User/Partition/QOS columns of
-   `sacctmgr -P show assoc` with `sacctmgr-assoc.txt` (other columns changed
-   between 23.02 and 26.05).
+   `sacctmgr -P show assoc` with `~/slurm-backup/<dir>/sacctmgr-assoc.txt`
+   (other columns changed between 23.02 and 26.05).
 5. Same command as step 3 again: converged (see the rules above).
 6. Tests (as a normal user on kosmos unless noted):
    - `munge -n | ssh <node> unmunge` from atlas for each node; `sinfo`;
