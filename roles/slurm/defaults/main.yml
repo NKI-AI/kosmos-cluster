@@ -117,6 +117,8 @@ hwloc_src_url: "https://download.open-mpi.org/release/hwloc/{{ hwloc_tag }}/hwlo
 hwloc_install_prefix: /opt/deepops/hwloc
 hwloc_configure: "./configure --prefix={{ hwloc_install_prefix }} --enable-static --disable-cairo --disable-libxml2 --enable-netloc --enable-plugins"
 hwloc_force_rebuild: no
+# sha256 of the tarball; empty skips the check (kosmos)
+hwloc_src_sha256: ""
 
 slurm_include_pmix: yes
 pmix_version: 3.2.3
@@ -124,3 +126,5 @@ pmix_src_url: "https://github.com/openpmix/openpmix/releases/download/v{{ pmix_v
 pmix_install_prefix: /opt/deepops/pmix
 pmix_configure: "./configure --prefix={{ pmix_install_prefix }} --with-hwloc={{ hwloc_install_prefix }}"
 pmix_force_rebuild: no
+# sha256 of the tarball; empty skips the check (kosmos)
+pmix_src_sha256: ""

@@ -17,6 +17,14 @@ slurm_src_sha256: "035f4b193d4de979ba5381beca206a50b6b886b2793b06f68a1ce7e67022b
 # slurmd segfaults with. 2.12.2 is the latest bugfix release of the 2.12 line
 # (2.13-2.15 are newer feature lines); Ubuntu 24.04 itself ships 2.10.
 hwloc_version: 2.12.2
+# kosmos: sha256 of the hwloc and PMIx tarballs, checked by the downloads in
+# roles/slurm/tasks/{hwloc,pmix}.yml. Computed 2026-10-01; hwloc's matches
+# the sha256 on open-mpi.org, PMIx's tarball matches the sha1 in the v3.2.3
+# release notes. Update each together with its version. pmix_version is the
+# role default, pinned here so it cannot change under its checksum.
+hwloc_src_sha256: "ff7d309fdff7ceddfe15c1e79eaff25f3126a134f29f44d4e85571f187a6bab8"
+pmix_version: 3.2.3
+pmix_src_sha256: "9b835f23c2f94a193c14012ee68b3657a61c568598cdd1212a3716b32d41a135"
 
 # Slurm 25.11 and newer can propagate an ordinary slurmctld restart as a
 # reconfiguration request to every slurmd and sackd. Keep this version-gated
