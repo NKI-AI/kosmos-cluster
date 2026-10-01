@@ -7,7 +7,7 @@
 - hosts: "{{ hostlist | default('all') }}"
   become: true
   pre_tasks:
-    # The fact cache (24 h, per admin) can still hold a host's facts from
+    # The fact cache (24 h, shared) can still hold a host's facts from
     # before its reinstall; with a stale ansible_distribution_version the
     # HWE install below is skipped and later plays pick 22.04 repositories.
     # Refreshing here also updates the cache for the rest of slurm-cluster.yml.

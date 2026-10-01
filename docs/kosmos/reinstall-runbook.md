@@ -8,9 +8,10 @@ Slurm 26.05.4 fresh with a new accounting database (job IDs restart at 1).
 carlos, plato, mariecurie and schrodinger are gone. gorgophone and the file
 servers are not part of this maintenance.
 
-The order below matters; how long each step takes does not. Apart from
-atlas being in the first batch, nothing depends on which nodes come first:
-every playbook takes `-l`.
+The steps are in order. IT hands hosts over in no fixed order, so section 2
+runs once per batch of hosts that are ready (`-l`): deploy and test them,
+bring them back, and go on with the next batch. Only the first batch must
+contain atlas.
 
 Rules for every step:
 
@@ -19,6 +20,8 @@ Rules for every step:
   `source /opt/kosmos-cluster/env-26.07/bin/activate`, from an up-to-date
   `deepops-26.07` (`git pull`). Every host must be deployed from this one
   env, or the munge keys differ.
+- One admin runs the playbooks, the others help with problems: two runs at
+  the same time both rewrite `slurm.conf` and restart slurmctld.
 - Every command uses `-kK` (ssh password, sudo password): atlas has no
   Kerberos host principal, and the reinstalled hosts may not have one yet.
 - **Every Slurm run includes atlas** (`-l atlas,<nodes>`). Compute nodes read
@@ -35,22 +38,22 @@ Rules for every step:
   refreshed a host, the cache holds its 24.04 facts for everyone.
   `kernel.yml` also refreshes the OS facts itself, at the start of every
   `slurm-cluster.yml` run; the flag is the second safeguard.
-- A step that fails: fix it on a branch, merge into `deepops-26.07`, pull,
-  rerun the same command.
-- A converged rerun reports `changed` only for the Slurm daemon restarts
-  (slurmdbd and slurmctld on atlas, slurmd on the nodes) and `mount drives`
-  on every host: those tasks always run. Anything else changed means the run
-  had not converged.
+- Running the same command a second time should change nothing (step 2.5).
+  A few tasks report `changed` on every run and are fine: the Slurm daemon
+  restarts (slurmdbd and slurmctld on atlas, slurmd on the nodes) and
+  `mount drives`. Any other `changed` in the second run means the first run
+  left something half done.
 
 ## 0. Before the maintenance
 
-1. **QOS limits.** Copied into `slurm_qos` in
+1. **QOS limits. Done (2026-09-30).** Copied into `slurm_qos` in
    `config/group_vars/slurm-cluster.yml` from `sacctmgr -P show qos` on
    2026-09-30. If anyone changes a QOS on the live cluster before the wipe,
    update it there too; `sacctmgr-qos.txt` from step 1.2 is the final check.
-2. **Secrets.** Done: `slurm_password` and `slurm_db_password` come from the
-   shared file on teuwen-ansible. The munge key is derived from
-   `slurm_password`, so every host gets the new key on its first run.
+2. **Secrets. Done (2026-09-30).** `slurm_password` and
+   `slurm_db_password` come from the shared file on teuwen-ansible. The
+   munge key is derived from `slurm_password`, so every host gets the new
+   key on its first run.
 3. **Dry run against the live cluster** (22.04, nothing changes), from
    `reinstall-prep` before it is merged (`git switch reinstall-prep && git
    pull` in your clone):
@@ -108,7 +111,8 @@ Rules for every step:
    The snapshot also lists what was installed by hand under `/usr/local` and
    `/opt` (`info.txt`): anything there that users need and no playbook
    installs is lost with the wipe.
-4. Copy `~/slurm-backups` and `~/reinstall-snapshot` off teuwen-ansible.
+4. Copy `~/slurm-backups` and `~/reinstall-snapshot` off teuwen-ansible,
+   to a place the admins agree on that is not being reinstalled.
 5. IT starts installing.
 
 ## 2. Deploy, per batch of nodes IT hands over
@@ -204,7 +208,7 @@ That is harmless; power it off or ignore it.
    - Load: `sbatch --array=1-500 -p <partition> --qos <qos> --wrap 'sleep
      30'` on the CPU and a GPU partition together; all complete, nothing
      drains.
-7. Fix, merge, pull, rerun step 3 with the same `-l`.
+7. Fix on `deepops-26.07`, pull, rerun step 3 with the same `-l`.
 
 ## 3. Go-live (all twelve hosts deployed)
 
@@ -218,12 +222,12 @@ That is harmless; power it off or ignore it.
 
 Fallbacks: the GA 6.8 kernel stays installed (the grub menu is hidden: pick
 it from the console, or `grub-reboot`); the driver branch is one variable
-(`nvidia_driver_branch`); there is no way back to 23.02 other than the
-backups from step 1.
+(`nvidia_driver_branch`).
 
-After go-live, `kernel.yml` (also part of `slurm-cluster.yml`) reboots every
-host in the run whose kernel command line changes, or that has a new kernel
-series installed. Drain first when changing `kernel_cmdline_*`.
+After go-live, a `slurm-cluster.yml` run reboots a host (`kernel.yml`) when
+it changes the host's kernel command line or finds a newer kernel series
+installed (7.0 to 7.x; ordinary 7.0 updates do not reboot). Drain the nodes
+before changing `kernel_cmdline_*`.
 
 ## 4. After go-live, once things run smoothly
 
@@ -242,7 +246,7 @@ series installed. Drain first when changing `kernel_cmdline_*`.
 
 ## What changed on purpose
 
-Deviations 23-36 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
+Deviations 23-39 in `docs/kosmos/porting-notes.md`, plus the 25 upstream
 commits cherry-picked onto `reinstall-prep` (exporter restart and local
 build, retired Singularity wrapper, epilog/prolog fixes, NHC sshd match,
 pam_slurm_adopt guard, slurmd PATH).
