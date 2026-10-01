@@ -331,7 +331,6 @@ Changes that can break existing scripts (Slurm release notes 23.11-26.05):
 - `--cpus-per-task` also sets `SLURM_TRES_PER_TASK=cpu:N`;
   `SLURM_NODE_ALIASES` is gone.
 - `sacctmgr list associations` has no `lft` column any more (`lineage`).
-- Jobs get 120 s between SIGTERM and SIGKILL (was 30 s).
 - Job IDs start again at 1. Accounting history from before the maintenance
   is not in `sacct`; the admins keep an export.
 - Ubuntu 24.04: system Python 3.12, glibc 2.39. Software compiled on the old

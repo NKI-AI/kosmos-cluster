@@ -290,7 +290,7 @@ the playbook's `when: docker_install | default('yes')` treats as true
 compute nodes. The live file was rendered by master on 2025-12-08. Every
 difference is expected:
 
-- `KillWait=30` -> `120` (deviation 3).
+- `KillWait=30` -> `120` (deviation 3; back to 30 since 2026-10-01).
 - carlos, plato, schrodinger, mariecurie node lines gone; partitions
   `rtx2080ti_sm` and `p6000` gone; `rtx2080ti` becomes `Default=YES`
   (phase-out commit e812a659 plus the default-partition fix, section 2).
@@ -404,7 +404,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
   them. So a full `slurm.yml` run always restarts slurmctld and slurmdbd on
   atlas and slurmd on every node in the run.
 - **slurm.conf** (rendered on atlas into `/sw/.slurm`, and the same diff on
-  `/etc/slurm/slurm.conf` of all three hosts): `KillWait` 30 to 120
+  `/etc/slurm/slurm.conf` of all three hosts): `KillWait` 30 to 120 (back to 30 since 2026-10-01)
   (deviation 3); the four phased-out NodeName lines gone; partition table
   in the order of `partition_settings` (deviation 14); aristarchus
   RealMemory 980306 to 980304 and gaia 489970 to 489957 (custom memory
@@ -443,7 +443,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 1 | `scripts/setup.sh` | venv default `/opt/kosmos-cluster/env` | venv in `./env` (upstream default) | Shared venv on teuwen-ansible, one Ansible for all admins; clones are per admin (decided 2026-09-08, see "Setup decision") | b084b7f1 |
 | 1b | `.github/workflows/setup.yml` | activates `/opt/kosmos-cluster/env` | upstream activates `/opt/deepops/env` (master still has the 23.08 workflows) | Follows deviation 1; the CI job failed on every push until the path matched. Flip together with deviation 1 | chunk 6 |
 | 2 | `roles/{slurm,nhc,nvidia-dcgm-exporter,nginx-docker-registry-cache,standalone-container-registry,pyxis}/defaults/main.yml` | untouched upstream files | overrides build/config paths to `/opt/kosmos-cluster/...`, `slurm_cluster_name: kosmos`, `standalone_container_registry_name: kosmos-registry`, `slurm_pyxis_version: 0.19.0` | Site values belong in `config/group_vars`, not in vendored roles. All of them are now set in `config/group_vars/{all,slurm-cluster}.yml`, derived from `deepops_dir` | c9d86ffc, chunk 5b |
-| 3 | `roles/slurm/templates/etc/slurm/slurm.conf` | `KillWait=120` (upstream 26.07 value) | `KillWait=30` | 30 was the 23.08 default, not a site choice. Upstream raised it in Sept 2024 for more graceful job termination. Behavior change: jobs get 120 s instead of 30 s between SIGTERM and SIGKILL. Flip: set `KillWait=30` in the template | c9d86ffc |
+| 3 | `roles/slurm/templates/etc/slurm/slurm.conf` | `KillWait=30`, as master (upstream 26.07 has 120) | `KillWait=30` | Upstream raised it to 120 in Sept 2024 for more graceful job termination; the branch carried that until 2026-10-01, then went back to 30, Slurm's default and the live value: only jobs that catch SIGTERM gain from the longer grace time, and a node stays busy up to 90 s longer after each timed-out job. Not to be confused with `UnkillableStepTimeOut=180` (raised from 120 by Daan, 66de5892, 2024-07-09), which is kept. Flip: set `KillWait=120` in the template | c9d86ffc, reverted 2026-10-01 |
 | 4 | `playbooks/slurm-cluster/slurm.yml` | keeps `roles: [facts]` in the first play, in addition to the fact-gathering pre_task | removed the role, keeps only the pre_task | The role installs the custom fact scripts (`topology`, `memory`, `gpus`) that slurm.conf needs. Master relies on other playbooks having installed them. On existing nodes the role is a no-op (scripts unchanged since 23.08). Flip: delete the `roles:` block | 00ae45d2 |
 | 5 | `roles/spack.environment`, `playbooks/slurm-cluster/spack-modules.yml`, `roles/spack/defaults/main.yml` | untouched upstream (no spack.environment role, upstream spack-modules.yml, upstream spack pin v1.2.0) | adds a role that installs Spack profile scripts on all hosts plus zsh support, a play for it in spack-modules.yml, and pins spack v0.20.2 with gcc/gfortran deps (EricMarcus-ai and joren, June 2024) | Spack was never rolled out: `/sw` (shared NFS) has no spack directory, no node has `/etc/profile.d/z00_spack.*`, `spack` is not on the path, and `slurm_install_spack` is `false` in config so the play never runs. Confirmed with the admin that nobody uses Spack. Flip: `git checkout master -- roles/spack.environment playbooks/slurm-cluster/spack-modules.yml` and set `spack_version`/`spack_ubuntu_deps` in group_vars (upstream already has gcc/gfortran) | (not applied, chunk 4d) |
 | 6 | `config/group_vars/{all,slurm-cluster}.yml`, `config/host_vars/atlas` | no Singularity at all: upstream retired the Singularity wrapper (4572599d, cherry-picked 2026-09-30) and the site `slurm_cluster_install_singularity`, `singularity_conf_path`, `bind_paths` and golang variables went with it | `slurm_cluster_install_singularity: yes` | Apptainer replaced Singularity on the nodes (chunk 4c, deviation 22); upstream's playbook was already broken in 26.07. Flip: none (the playbook no longer exists upstream) | chunk 5b, 2026-09-30 |
@@ -516,7 +516,6 @@ same fix or removed the code in question.
 Changes the upgrade brings that we accept rather than pin back. Also listed
 in the table above where a flip is possible.
 
-- `KillWait` 30 -> 120 (see deviation 3).
 - `nvidia-dcgm-exporter` container image: `2.1.8-2.4.0-rc.2-ubuntu20.04` ->
   `4.5.3-4.8.2-distroless` (role default; monitoring is enabled).
 - `standalone-container-registry` image `registry:2.8` -> `3.1.1` and
@@ -564,6 +563,22 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   (see "Running playbooks from teuwen-ansible").
 - **After go-live, not blocking: configless Slurm.** See "Configless Slurm"
   below.
+- **After go-live, not blocking: multifactor priority with fair share**
+  (raised 2026-10-01, the admins like the idea). The reinstall keeps
+  `PriorityType=priority/basic`: first come, first served, as on 23.02 (the
+  23.02 default; 23.11 made multifactor the default, so the branch sets
+  basic explicitly). Multifactor gives each pending job a weighted score
+  from fair share (recent usage against the user's share, decaying with
+  `PriorityDecayHalfLife`), age, job size, partition and QOS, so a heavy
+  user no longer queues ahead of everyone else; backfill keeps working as
+  now. The template already carries commented-out weights
+  (`PriorityWeightFairshare=100000`, `PriorityWeightAge=1000`, ...). To
+  decide as a team: the weights, the half-life, and the shares (everyone is
+  in `compute-account` now, so fair share is between users unless accounts
+  per group are introduced); then announce it, set the lines in
+  `roles/slurm/templates/etc/slurm/slurm.conf` and check the ordering with
+  `sprio` and `sshare` on a busy queue. The per-user GPU limits in the QOS
+  stay as they are.
 - **After go-live, not blocking: Docker and containerd onto supported
   versions** (decided 2026-10-01). The reinstall keeps the pin of deviation
   13: Docker 28.3 (28.3.3) and containerd.io 1.6.32, kubespray 2.31's
