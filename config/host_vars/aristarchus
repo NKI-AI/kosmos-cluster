@@ -1,0 +1,6 @@
+---
+# kosmos: aristarchus booted 22.04 with iommu=pt (hand-edited
+# GRUB_CMDLINE_LINUX_DEFAULT, snapshot 2026-10-05), like gaia. Passthrough
+# mode skips IOMMU translation for the host's own DMA. Kept as it was; remove
+# the line to run with the kernel default (translated).
+kernel_cmdline_extra: "iommu=pt"

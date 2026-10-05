@@ -76,12 +76,12 @@ software_extra_packages:
 # kernel stays installed as the grub fallback.
 kernel_hwe: true
 kernel_hwe_release: "24.04"
-# Kernel command line (GRUB_CMDLINE_LINUX). pci=realloc=off on nodes whose
-# gpus fact is non-zero: keeps the firmware's PCI BAR layout, so the kernel's
-# automatic resource reallocation cannot leave a GPU without its large BAR.
-# The GPU nodes ran with it on 22.04 (hand-edited grub). Per-host additions
-# go in kernel_cmdline_extra (host_vars).
-kernel_cmdline_gpu: "pci=realloc=off"
+# Kernel command line (GRUB_CMDLINE_LINUX). kernel_cmdline_gpu is added only
+# on nodes whose gpus fact is non-zero, kernel_cmdline_extra on every host
+# (both per host in host_vars). Empty by default: the 22.04 snapshot
+# (2026-10-05) showed pci=realloc=off only on herakles and iommu=pt only on
+# aristarchus and gaia, so those three carry them in config/host_vars.
+kernel_cmdline_gpu: ""
 kernel_cmdline_extra: ""
 kernel_reboot_timeout: 1800
 

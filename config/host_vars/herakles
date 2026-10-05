@@ -1,0 +1,6 @@
+---
+# kosmos: herakles booted 22.04 with pci=realloc=off (hand-edited
+# GRUB_CMDLINE_LINUX), the only node that did (snapshot 2026-10-05). Keeps
+# the firmware's PCI BAR layout, so the kernel's automatic resource
+# reallocation cannot leave a GPU (8x H100, NVSwitch) without its large BAR.
+kernel_cmdline_gpu: "pci=realloc=off"
