@@ -140,7 +140,9 @@
           echo "### systemctl is-active slurmctld slurmdbd mariadb munge"; systemctl is-active slurmctld slurmdbd mariadb munge || true
           echo "### sacctmgr show cluster"; {{ slurm_install_prefix }}/bin/sacctmgr -n show cluster format=Cluster,ControlHost,RPC || true
           echo "### sacctmgr show runawayjobs (informational; fix by hand, never with -i)"
-          {{ slurm_install_prefix }}/bin/sacctmgr -P show runawayjobs </dev/null || true
+          # Answer its "fix these?" prompt with n: from /dev/null it reads EOF,
+          # which is not Y/N, and asks again forever (2026-10-05).
+          printf 'n\n' | {{ slurm_install_prefix }}/bin/sacctmgr -P show runawayjobs || true
           echo "### sinfo -R"; {{ slurm_install_prefix }}/bin/sinfo -R || true
           echo "### squeue counts"; {{ slurm_install_prefix }}/bin/squeue -h -o %T | sort | uniq -c || true
           echo "### database size (MB per table)"
