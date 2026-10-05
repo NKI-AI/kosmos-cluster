@@ -562,6 +562,9 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   principal, so any `slurm.yml` run that includes atlas still needs `-k`.
   Join it to the realm
   (see "Running playbooks from teuwen-ansible").
+- **High, after go-live: admins locked out of every compute node when
+  `slurm.conf` cannot be read** (incident 2026-10-05). See "Admin lockout
+  through pam_slurm_adopt" below.
 - **After go-live, not blocking: configless Slurm.** See "Configless Slurm"
   below.
 - **After go-live, not blocking: multifactor priority with fair share**
@@ -607,8 +610,9 @@ files (`gres.conf`, `cgroup.conf`, ...) are rendered on each host. Upstream's
 default (`false`) renders a copy of `slurm.conf` on every host instead.
 
 Costs of the symlink: `slurmd` cannot start, and the Slurm commands on kosmos
-fail, while `/sw` is not mounted; the link needed a workaround for the
-exporter container (deviation 34).
+fail, while `/sw` is not mounted; ssh to the compute nodes fails for
+everyone, admins included (see "Admin lockout through pam_slurm_adopt");
+the link needed a workaround for the exporter container (deviation 34).
 
 Configless (SchedMD's recommended setup since Slurm 20.02):
 `SlurmctldParameters=enable_configless` on atlas, `slurmd --conf-server atlas`
@@ -626,6 +630,62 @@ time to test it. To do: the role change behind a variable, a test on one
 node, then the switch; drop `slurm_conf_symlink`, `slurmctl_config_dir` and
 deviation 34 afterwards. Check first which files configless serves in 26.05
 (prolog/epilog scripts are deployed by Ansible either way).
+
+### Admin lockout through pam_slurm_adopt (incident 2026-10-05)
+
+What happened: kronos crashed (its OS SSDs) on the morning of the
+maintenance and came back up. atlas and kosmos were rebooted and mounted
+`/sw` (`kronos:/data-pool/software`) again; the compute nodes kept their
+old mount, which no longer worked. From then on ssh to every compute node
+failed for everyone, admins included, and slurmd was down on the nodes
+(`Not responding`, port 6818 refused). kosmos was not affected.
+
+The client sees authentication succeed (Kerberos or password) and then
+`Connection closed by UNKNOWN port 65535`. The node's syslog (copy on
+atlas in `/var/log/deepops-hosts/<node>/`):
+
+```
+pam_slurm_adopt: error: resolve_ctls_from_dns_srv: res_nsearch error: Unknown host
+pam_slurm_adopt: error: fetch_config: DNS SRV lookup failed
+pam_slurm_adopt: fatal: Could not establish a configuration source
+```
+
+Why: the PAM account stack that `roles/slurm/tasks/compute.yml` writes into
+`/etc/pam.d/sshd` calls `pam_slurm_adopt` first and lets admins in
+(`/etc/localusers`, `/etc/localgroups`) only after it. `pam_slurm_adopt`
+runs inside the sshd process and reads `/etc/slurm/slurm.conf`, a symlink
+to `/sw/.slurm/slurm.conf`. Without it, libslurm tries configless (a DNS SRV
+record, which does not exist), then calls `fatal()`, which exits the sshd
+process instead of returning a PAM error. The admin lines are never
+reached, and the leading `-` only covers a missing module file. Ansible
+cannot reach the nodes either (same ssh), so the only way in is the
+console.
+
+Recovery on a node: get `slurm.conf` readable again, e.g. from the BMC
+console (`umount -l /sw && mount /sw`) or a reboot once kronos exports
+`/sw` again. ssh works as soon as the file is readable.
+
+Fix, two parts:
+
+1. **Admins first in the PAM stack.** Move the two `pam_listfile` lines
+   above the first `pam_slurm_adopt` line in both blocks of
+   `roles/slurm/tasks/compute.yml` (the `blockinfile` markers stay, so a
+   run replaces the block in place). A `sufficient` success ends the stack,
+   so admins never load Slurm code at login and any Slurm failure (missing
+   config, broken library, slurmd down) leaves them a way in. Cost: an
+   admin's ssh session is no longer adopted into the cgroup of their own
+   job on that node; users are unchanged. Test on one node with a second
+   session open (a wrong account line locks everyone out): admin without a
+   job gets in, user without a job is refused, user with a job is adopted.
+   Deviation from upstream's order; record it in section 1.
+2. **Take kronos out of the path for `slurm.conf`.** Configless Slurm (next
+   section): slurmd keeps a copy of the config on local disk and
+   `pam_slurm_adopt` and the commands read it through `/run/slurm/conf`.
+   That moves the dependency from kronos to slurmd and atlas, so part 1 is
+   still needed. The quicker alternative is `slurm_conf_symlink: false`,
+   upstream's default: every host renders its own copy of `slurm.conf` from
+   the template (`roles/slurm/tasks/compute.yml`); a node a run did not
+   reach keeps an old copy until the next run.
 
 ### Maintenance day 2026-10-05
 
