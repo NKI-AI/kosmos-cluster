@@ -168,6 +168,20 @@ nvidia_driver_force_install: false
 nvidia_driver_branch: "580"
 # Set true on Ubuntu systems that require NVIDIA open kernel modules.
 nvidia_driver_ubuntu_use_open_kernel_modules: false
+# kosmos: unattended-upgrades must not upgrade the driver. Ubuntu ships NVIDIA
+# security fixes in noble-security; a new userspace under the loaded module
+# breaks nvidia-smi, NVML and slurmd's GPU detection until a reboot ("Driver/
+# library version mismatch"), and on herakles leaves the fabric manager behind
+# the driver. Prefix regexes for Unattended-Upgrade::Package-Blacklist
+# (unattended-upgrade uses re.match), written by nvidia-driver.yml on GPU
+# nodes. Upgrade the driver with apt and a reboot in a maintenance; a manual
+# apt upgrade is not blocked. Empty list: the file is removed.
+nvidia_driver_unattended_upgrades_blacklist:
+  - "nvidia-"
+  - "libnvidia-"
+  - "linux-modules-nvidia-"
+  - "linux-objects-nvidia-"
+  - "linux-signatures-nvidia-"
 
 # kosmos: GPU architecture per PCI vendor:device ID, as reported by the gpus
 # custom fact (roles/facts/files/gpus.fact, pci_ids). nvidia-driver.yml

@@ -221,6 +221,9 @@ That is harmless; power it off or ignore it.
      `scontrol show node <node>`: CPUTot equals `slurmd -C` on the node,
      RealMemory is about 95 % of it (the memory fact leaves 5 % for the OS),
      `Gres=gpu:N(S:...)` (the `S:` part is GPU-CPU affinity).
+   - On a GPU node: `apt-config dump | grep -A6 Package-Blacklist` lists the
+     NVIDIA prefixes, and `sudo unattended-upgrade --dry-run --debug 2>&1 |
+     grep -i nvidia` shows them as blacklisted, not as upgrades (deviation 41).
    - aristarchus: GPU count in the `gpus` fact = `nvidia-smi -L` = `Gres`,
      node not drained. herakles: `nvidia-smi -q | grep -A2 Fabric` shows
      `Completed` / `Success` for all eight GPUs; an 8-GPU NCCL all-reduce

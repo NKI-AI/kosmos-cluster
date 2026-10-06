@@ -43,6 +43,36 @@
       include_tasks: tasks/nvidia-driver-ubuntu-packages.yml
       when: ansible_distribution == 'Ubuntu'
 
+    # kosmos: keep unattended-upgrades away from the driver packages
+    # (nvidia_driver_unattended_upgrades_blacklist, config/group_vars/all.yml).
+    # Written before the install so no automatic upgrade can slip in between.
+    - name: exclude NVIDIA driver packages from unattended-upgrades
+      copy:
+        dest: /etc/apt/apt.conf.d/52kosmos-nvidia-unattended-upgrades
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          // Managed by Ansible (playbooks/nvidia-software/nvidia-driver.yml).
+          // Upgrade the NVIDIA driver by hand, with a reboot.
+          Unattended-Upgrade::Package-Blacklist {
+          {% for pkg in nvidia_driver_unattended_upgrades_blacklist %}
+              "{{ pkg }}";
+          {% endfor %}
+          };
+      when:
+        - ansible_distribution == 'Ubuntu'
+        - nvidia_driver_unattended_upgrades_blacklist | default([]) | length > 0
+        - (ansible_local['gpus']['count'] and is_dgx.stat.exists == False) or (nvidia_driver_force_install|default(false))
+
+    - name: remove the unattended-upgrades exclusion when none is configured
+      file:
+        path: /etc/apt/apt.conf.d/52kosmos-nvidia-unattended-upgrades
+        state: absent
+      when:
+        - ansible_distribution == 'Ubuntu'
+        - nvidia_driver_unattended_upgrades_blacklist | default([]) | length == 0
+
     - name: install nvidia driver
       include_role:
         name: nvidia.nvidia_driver
