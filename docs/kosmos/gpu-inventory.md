@@ -95,10 +95,10 @@ stayed within a socket everywhere except aristarchus, whose hand-edited
 socket 0 instead of 1. The `gpu_topology` lists in the host_vars of carlos,
 plato and schrodinger were never read by any template.
 
-From Slurm 24.11, `gres.conf` is a single `AutoDetect=nvidia` line
-(`slurm_gres_autodetect` in `config/group_vars/slurm-cluster.yml`). slurmd
-then reads the device minors itself and converts each GPU's CPU list to
-Slurm core ids; no NVML build and no CUDA toolkit are needed. It does not
+`gres.conf` is a single `AutoDetect=nvidia` line (`slurm_gres_autodetect:
+nvidia` in `config/group_vars/slurm-cluster.yml`). slurmd then reads the
+device minors itself and converts each GPU's CPU list to Slurm core ids;
+no NVML build and no CUDA toolkit are needed. It does not
 detect NVLinks (`AutoDetect=nvml` would, and could prefer bridged pairs on the
 A6000/A100 nodes). `Gres=gpu:N` in slurm.conf stays untyped and still matches.
 The driver must be loaded before slurmd starts, or the node reports fewer

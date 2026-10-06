@@ -26,11 +26,9 @@ hwloc_src_sha256: "ff7d309fdff7ceddfe15c1e79eaff25f3126a134f29f44d4e85571f187a6b
 pmix_version: 3.2.3
 pmix_src_sha256: "9b835f23c2f94a193c14012ee68b3657a61c568598cdd1212a3716b32d41a135"
 
-# Slurm 25.11 and newer can propagate an ordinary slurmctld restart as a
-# reconfiguration request to every slurmd and sackd. Keep this version-gated
-# so the current 23.02 controller never sees an unsupported parameter; it can
-# also be overridden to false during a rolling upgrade.
-slurm_enable_reconfig_on_restart: "{{ slurm_version is version('25.11', '>=') }}"
+# Shared slurm.conf: a slurmctld restart must make every slurmd reread the
+# file. Slurm 25.11+ supports this; Kosmos is on 26.05.4.
+slurm_enable_reconfig_on_restart: true
 
 # kosmos: site paths. Upstream roles default to /opt/deepops; master carried
 # these as edits to roles/*/defaults, here they live in site config.
@@ -140,14 +138,11 @@ slurm_qos:
 # See docs/slurm-cluster/nvml.md for details.
 slurm_autodetect_nvml: false
 
-# kosmos: let slurmd detect the GPUs itself (gres.conf AutoDetect). "nvidia"
-# (Slurm >= 24.11) reads the driver's device numbering and converts each GPU's
-# CPU affinity to Slurm core numbers; it needs no NVML, so none of the CUDA
-# install slurm_autodetect_nvml brings, but it detects no NVLinks or MIG.
-# Below 24.11 gres.conf is generated from the topology fact, whose Cores=
-# lists are Linux CPU thread ids that Slurm rejects (docs/kosmos/gpu-inventory.md).
-# The NVIDIA driver must be loaded before slurmd starts.
-slurm_gres_autodetect: "{{ 'nvidia' if slurm_version is version('24.11', '>=') else '' }}"
+# kosmos: slurmd detects GPUs (gres.conf AutoDetect=nvidia). Reads the
+# driver's device numbering and converts CPU affinity to Slurm core ids;
+# no NVML/CUDA. Does not detect NVLinks or MIG. The driver must be loaded
+# before slurmd starts. See docs/kosmos/gpu-inventory.md.
+slurm_gres_autodetect: nvidia
 
 # Ensure hosts file generation only runs across slurm cluster
 hosts_add_ansible_managed_hosts_groups: ["slurm-cluster"]
