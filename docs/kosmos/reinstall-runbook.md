@@ -289,10 +289,12 @@ That is harmless; power it off or ignore it.
    - `nodestat`, `nodestat -j`, `nodestat -g` on kosmos: every node that is
      in, CPU/GPU/memory counts that match `sinfo` and `squeue`.
    - Logs on atlas and a node: `grep -Ei 'defunct|deprecated|error'
-     /var/log/slurm/*.log`. Harmless on atlas until we enable REST:
-     `cannot create http_parser context` on every slurmctld start
-     (deviation 37; `docs/kosmos/porting-notes.md`, "slurmctld http_parser
-     log"). Install the parser when we want slurmrestd, not to quiet the log.
+     /var/log/slurm/*.log`. Harmless on atlas (see
+     `docs/kosmos/porting-notes.md`): `cannot create http_parser context`
+     until we enable REST (deviation 37, "slurmctld http_parser log");
+     `No cgroup.conf` / `No memory enforcing mechanism configured` because
+     that file is only on compute ("slurmctld cgroup.conf log"). No need to
+     put `cgroup.conf` on atlas; jobs already have cgroups on the nodes.
    - Load: `sbatch --array=1-500 -p <partition> --qos <qos> --wrap 'sleep
      30'` on the CPU and a GPU partition together; all complete, nothing
      drains.

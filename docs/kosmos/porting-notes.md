@@ -666,6 +666,24 @@ When we want REST, add `libhttp-parser-dev` (and libjwt), pass
 `--with-libhttp-parser`, and rebuild with `slurm_force_rebuild=true`. Until
 then, leave the build as it is.
 
+### slurmctld cgroup.conf log (not an issue for now, recorded 2026-10-06)
+
+On atlas after the 26.05.4 reinstall, every slurmctld start logs
+`No cgroup.conf file (/etc/slurm/cgroup.conf), using defaults` and
+`No memory enforcing mechanism configured`. That is **not a problem
+today**. Job cgroups are applied by slurmd/slurmstepd from each compute
+node's own file (`ConstrainCores/Devices/RAMSpace=yes`). Scheduling of
+memory is `SelectTypeParameters=CR_Core_Memory` in `slurm.conf`. First-batch
+nodes that ran the compute play already have `/etc/slurm/cgroup.conf`.
+
+The role only templates that file in `compute.yml` (upstream does the
+same). atlas is the controller, so the task never ran. slurmctld still
+opens `cgroup.conf` at start and reports its **local** view.
+
+Leave it. Copying the file onto atlas is not required for jobs or for
+scheduling. It would only silence those two lines. Until then, ignore
+them.
+
 ### Configless Slurm (follow-up after go-live, decided 2026-10-01)
 
 Today (master and this branch, `slurm_conf_symlink: true`): the controller
