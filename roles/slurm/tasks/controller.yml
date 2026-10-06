@@ -137,12 +137,47 @@
   tags:
   - config
 
-- name: configure slurm.conf to nfs
+# kosmos: the NFS server may squash root (kronos does since 2026-10-05), so
+# root cannot write slurmctl_config_dir. Render the file on local disk, then
+# put it in place as the slurm user, who owns the directory. runuser from
+# root needs no sudo rule for the slurm user; cp + mv replaces the file in
+# one step, so readers (pam_slurm_adopt at every ssh login) never see it
+# missing. slurm.conf.shared is the last deployed copy, and --check --diff
+# compares against it.
+- name: render slurm.conf for nfs
   template:
     src: "{{ slurm_conf_template }}"
-    dest: "{{ slurmctl_config_dir }}/slurm.conf"
+    dest: "{{ slurm_config_dir }}/slurm.conf.shared"
     mode: "0644"
+  register: slurm_conf_rendered
   when: slurm_conf_symlink
+  notify:
+  - restart slurmctld
+  tags:
+  - config
+
+- name: read the checksums of the rendered and the shared slurm.conf
+  stat:
+    path: "{{ item }}"
+    get_checksum: true
+  loop:
+    - "{{ slurm_config_dir }}/slurm.conf.shared"
+    - "{{ slurmctl_config_dir }}/slurm.conf"
+  register: slurm_conf_checksums
+  when: slurm_conf_symlink
+  tags:
+  - config
+
+- name: configure slurm.conf to nfs
+  command: >-
+    runuser -u {{ slurm_username }} -- sh -c
+    'cp "$1" "$2.new" && chmod 0644 "$2.new" && mv -f "$2.new" "$2"' sh
+    {{ slurm_config_dir }}/slurm.conf.shared {{ slurmctl_config_dir }}/slurm.conf
+  changed_when: true
+  when:
+    - slurm_conf_symlink
+    - not ansible_check_mode
+    - (slurm_conf_checksums.results | map(attribute='stat.checksum', default='') | unique | length) > 1
   notify:
   - restart slurmctld
   tags:

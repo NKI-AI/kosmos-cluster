@@ -38,19 +38,33 @@
     enablerepo: powertools
   when: ansible_os_family == "RedHat"
 
-- name: "mkdir software path"
+# kosmos: both paths are on NFS (/sw). When the server squashes root (kronos
+# does since 2026-10-05), root on a client cannot create them; warn instead
+# of failing the host. Lmod works without them (no modules to load).
+- name: "mkdir software and module paths"
   become: yes
   file:
-    path: "{{ sm_software_path }}"
+    path: "{{ item }}"
     state: directory
     mode: "0755"
+  loop:
+    - "{{ sm_software_path }}"
+    - "{{ sm_module_path }}"
+  register: lmod_sm_dirs
+  failed_when:
+    - lmod_sm_dirs.failed | default(false)
+    - "'Permission denied' not in lmod_sm_dirs.msg | default('')"
 
-- name: "mkdir module path"
-  become: yes
-  file:
-    path: "{{ sm_module_path }}"
-    state: directory 
-    mode: 0755
+- name: "report software and module paths that root cannot create"
+  debug:
+    msg: >-
+      {{ item.item }} does not exist and root cannot create it (root squashed
+      on the NFS server); create it on the server. Lmod finds no modules there
+      until then.
+  loop: "{{ lmod_sm_dirs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: "'Permission denied' in item.msg | default('')"
 
 - name: "configure sh profile"
   become: yes
