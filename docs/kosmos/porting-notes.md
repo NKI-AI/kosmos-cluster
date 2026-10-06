@@ -628,6 +628,32 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   drain), or, if only herakles has one, leave it and note it in
   `config/host_vars/herakles`. No hand edits on the nodes in the meantime
   (admins' decision).
+- **After go-live, not blocking: kronos squashes root on `/sw`** (found
+  2026-10-06; root cannot write from atlas or from an untouched 22.04 node,
+  so the export changed, most likely when kronos came back from its OS disk
+  crash on 2026-10-05). Deviations 42 and 43 work around it. Ask the kronos
+  admins whether it is intended. If root write access comes back, the two
+  deviations can stay (they work either way) or be reverted. Either way
+  `/sw/modules/all` (Lmod's module path) does not exist; create it on kronos
+  if modules are ever published there, or decide to drop Lmod
+  (`slurm_install_lmod`). Configless Slurm (below) removes the `slurm.conf`
+  part of the dependency.
+- **Low priority: `[WARNING]: conditional statements should not include
+  jinja2 templating`** in every `slurm-cluster.yml` run (line 84 of the
+  2026-10-06 deploy log). Source: upstream's
+  `when: "{{ slurm_configure_etc_hosts | default(true) }}"` on the
+  `generic/hosts.yml` import in `playbooks/slurm-cluster.yml`. Fix:
+  `when: slurm_configure_etc_hosts | default(true) | bool` (site value is
+  `no`, so nothing changes), and record it as a deviation or send it
+  upstream. Harmless today, but newer ansible-core versions are stricter
+  about templates in conditionals.
+- **Low priority: MySQL connector deprecation.** The slurm role installs
+  `python3-mysqldb` for the `community.mysql` modules on atlas, which warn
+  that MySQLdb support will be removed (and that `column_case_sensitive`
+  will change its default). Switch to `python3-pymysql`
+  (`roles/slurm/tasks/controller.yml`, "install dependencies") and set
+  `column_case_sensitive` explicitly on the `mysql_user` task, then check
+  that the slurmdbd user and grants are unchanged.
 
 ### Configless Slurm (follow-up after go-live, decided 2026-10-01)
 

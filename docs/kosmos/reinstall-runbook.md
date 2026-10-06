@@ -8,6 +8,22 @@ Slurm 26.05.4 fresh with a new accounting database (job IDs restart at 1).
 carlos, plato, mariecurie and schrodinger are gone. gorgophone and the file
 servers are not part of this maintenance.
 
+**Progress** (update as you go):
+
+- 2026-10-05: section 1 done (1.2 needed a second run, fixed in d27edb13;
+  1.1 was moot, the nodes were already DOWN in the maintenance reservation
+  after the kronos crash). The snapshot is in the network home and in
+  `/data/groups/public/backups/reinstall-2026-10-05` (sha256 checked). Before
+  2.4, check that `~/slurm-backup/<dir>` passes `sha256sum -c SHA256SUMS`.
+- 2026-10-06, first batch atlas, kosmos, gaia, aristarchus, herakles:
+  2.1-2.3 done (2.3 needed the root squash fix, deviations 42/43).
+  aristarchus `Gres=gpu:6`, herakles `gpu:8`, all three nodes IDLE, 17 QOS
+  with their limits. Open: 2.4 (accounting), 2.5, 2.6.
+- Second wave (euctemon, eudoxus, galileo, ptolemaeus, alanturing,
+  hamilton, roentgen): with IT. On 2026-10-06 hamilton was still on 22.04;
+  ptolemaeus, eudoxus, galileo and euctemon were reinstalled but not
+  deployed.
+
 The steps are in order. IT hands hosts over in no fixed order, so section 2
 runs once per batch of hosts that are ready (`-l`): deploy and test them,
 bring them back, and go on with the next batch. Only the first batch must
@@ -101,7 +117,8 @@ Rules for every step:
    run on all twelve hosts starts twelve Ansible processes at once; the dry
    runs used five. Ask IT for more memory and CPUs before the maintenance
    (a resize needs a reboot of the VM). If that does not happen, add `-f 4`
-   to the playbook commands: slower, but within its memory. Free some disk
+   to the playbook commands: slower, but within its memory (not resized by
+   2026-10-06; `-f 5` for a five-host run worked). Free some disk
    too (`sudo du -xh -d2 / | sort -h | tail`); keep
    `/opt/kosmos-cluster/env` and `env-26.07`.
 
@@ -185,6 +202,11 @@ That is harmless; power it off or ignore it.
    (The second command says "no hosts matched" for a batch without compute
    nodes.) Secure Boot must be off on the compute nodes: the 580 driver is
    built by DKMS and an unsigned module does not load. If it is on, ask IT.
+   A reinstalled host has new ssh host keys. If ssh says `REMOTE HOST
+   IDENTIFICATION HAS CHANGED` with the offending key in
+   `/var/lib/sss/pubconf/known_hosts`, the old key comes from SSSD (the
+   directory's host entry), not from your `known_hosts`: IT has to update
+   the host's keys there. Until then the host is unreachable and is left out.
 2. Kernel, alone first to isolate kernel problems (also part of step 3):
 
    ```bash
@@ -207,6 +229,14 @@ That is harmless; power it off or ignore it.
    reachable nodes that are not deployed yet are left out silently. The
    NVIDIA driver install reboots GPU nodes with a 600 s timeout; if a large
    node (herakles) times out, rerun.
+   kronos squashes root on `/sw` (since 2026-10-05): atlas copies
+   `slurm.conf` into `/sw/.slurm` as the `slurm` user (deviation 42), and
+   the Lmod play prints that `/sw/modules/all` does not exist and root
+   cannot create it (deviation 43); both are expected. Also expected on a
+   first run: the ignored `ls -l /usr/sbin/nhc` failure (NHC not installed
+   yet) and the ignored fact gathering of unreachable nodes on atlas.
+   If a run stops, rerun the whole command: finished parts only report
+   `ok`, and later plays need facts from earlier ones (no `--start-at-task`).
 4. **First batch only, accounting.** On atlas, as yourself (root cannot
    read your NFS home, so copy the file to local disk first):
    `cp ~/slurm-backup/<dir>/sacctmgr-dump.cfg /tmp/`, then
@@ -218,7 +248,9 @@ That is harmless; power it off or ignore it.
 5. Same command as step 3 again: converged (see the rules above).
 6. Tests (as a normal user on kosmos unless noted):
    - `munge -n | ssh <node> unmunge` from atlas for each node; `sinfo`;
-     `scontrol show node <node>`: CPUTot equals `slurmd -C` on the node,
+     `scontrol show node <node>` (several nodes: comma-separated, one
+     argument; `sinfo -N -l` cuts memory values to six digits): CPUTot
+     equals `slurmd -C` on the node,
      RealMemory is about 95 % of it (the memory fact leaves 5 % for the OS),
      `Gres=gpu:N(S:...)` (the `S:` part is GPU-CPU affinity).
    - On a GPU node: `apt-config dump | grep -A6 Package-Blacklist` lists the
