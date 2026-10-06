@@ -492,6 +492,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 41 | `playbooks/nvidia-software/nvidia-driver.yml`, `config/group_vars/all.yml` (`nvidia_driver_unattended_upgrades_blacklist`) | on GPU nodes writes `/etc/apt/apt.conf.d/52kosmos-nvidia-unattended-upgrades`, an `Unattended-Upgrade::Package-Blacklist` of the NVIDIA driver packages (`nvidia-`, `libnvidia-`, the prebuilt `linux-{modules,objects,signatures}-nvidia-` modules; prefix regexes), before the driver install; an empty list removes the file. No `apt-mark hold` | nothing; on 22.04 the driver, DCGM and container toolkit were on `apt-mark hold` by hand (`docs/kosmos/gpu-inventory.md`) | The role installs the 580 branch with `state: present` and no version, and the reinstalled hosts run unattended-upgrades with the `-security` origin, where Ubuntu ships NVIDIA driver fixes. An automatic upgrade replaces the userspace under the loaded module: `nvidia-smi`, NVML and slurmd's `AutoDetect=nvidia` fail with "Driver/library version mismatch" until a reboot, and on herakles the fabric manager stays at the old version (CUDA "system not yet initialized"). The blacklist stops only the automatic path; `apt upgrade` by an admin still works, and a branch change does not first need holds lifted (see "Check-run results" on holds). Driver upgrades are done by hand in a maintenance, with a reboot. Flip: set the list to `[]` | 2026-10-06 |
 | 42 | `roles/slurm/tasks/controller.yml` | with `slurm_conf_symlink` the controller renders `slurm.conf` to `/etc/slurm/slurm.conf.shared` on local disk and copies it to `/sw/.slurm/slurm.conf` as the `slurm` user (`runuser`, `cp` + `mv`) when the two checksums differ; `--check --diff` compares against the local copy | the template writes `/sw/.slurm/slurm.conf` as root | kronos squashes root on `/data-pool/software` since 2026-10-05 (found in the first deploy run on 2026-10-06: `Destination /sw/.slurm not writable`; root cannot write from atlas or from an untouched 22.04 node, so the server changed, most likely in its recovery from the OS disk crash). `/sw/.slurm` belongs to `slurm` (uid 22078), which can still write. `runuser` from root needs no sudo rule for `slurm` and no ACLs for Ansible's temporary files; `mv` replaces the file in one step, so `pam_slurm_adopt` never finds it missing (see "Admin lockout"). The local copy is also the last deployed `slurm.conf` on atlas. Flip: revert this change (needs root write access to `/sw` again) | 2026-10-06 |
 | 43 | `roles/lmod/tasks/main.yml` | the software and module paths on `/sw` are created in one looped task that does not fail on `Permission denied`; a second task names each path root could not create | two `file` tasks that fail the host | Same root squash as 42: `/sw/modules/all` does not exist and root cannot create it, so every host would drop out of the run at Lmod, before motd, nodestat, monitoring and Apptainer. Lmod then runs with an empty module path; nothing is published under `/sw/modules` today. To create the path, ask the kronos admins, or create it on kronos. Flip: revert this change | 2026-10-06 |
+| 44 | `playbooks/slurm-cluster.yml` (`generic/hosts.yml` import) | `when: slurm_configure_etc_hosts \| default(true) \| bool` | `when: "{{ slurm_configure_etc_hosts \| default(true) }}"` | Every run warned `conditional statements should not include jinja2 templating` (2026-10-06 deploy log); newer ansible-core versions are stricter about templates in conditionals. Same result: the site value is `no`. Candidate for upstream. Flip: revert the line | 2026-10-06 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -638,15 +639,6 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   if modules are ever published there, or decide to drop Lmod
   (`slurm_install_lmod`). Configless Slurm (below) removes the `slurm.conf`
   part of the dependency.
-- **Low priority: `[WARNING]: conditional statements should not include
-  jinja2 templating`** in every `slurm-cluster.yml` run (line 84 of the
-  2026-10-06 deploy log). Source: upstream's
-  `when: "{{ slurm_configure_etc_hosts | default(true) }}"` on the
-  `generic/hosts.yml` import in `playbooks/slurm-cluster.yml`. Fix:
-  `when: slurm_configure_etc_hosts | default(true) | bool` (site value is
-  `no`, so nothing changes), and record it as a deviation or send it
-  upstream. Harmless today, but newer ansible-core versions are stricter
-  about templates in conditionals.
 - **Low priority: MySQL connector deprecation.** The slurm role installs
   `python3-mysqldb` for the `community.mysql` modules on atlas, which warn
   that MySQLdb support will be removed (and that `column_case_sensitive`

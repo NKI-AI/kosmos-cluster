@@ -19,7 +19,7 @@
 
 - name: Configure hostnames, /etc/hosts
   import_playbook: generic/hosts.yml
-  when: "{{ slurm_configure_etc_hosts | default(true) }}"
+  when: slurm_configure_etc_hosts | default(true) | bool
   tags:
   - set-etc-hosts
 
