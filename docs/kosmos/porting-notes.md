@@ -607,6 +607,25 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   wait for a kubespray bump that lists Docker 29; then pin the result in
   `config/group_vars/all.yml`. Watch for Docker 29's changed defaults (the
   containerd image store on fresh installs, a higher minimum API version).
+- **After go-live, not blocking: kernel options outside `kernel.yml`**
+  (found 2026-10-06). After the reinstall herakles boots with
+  `pci=realloc=off` twice: once from `GRUB_CMDLINE_LINUX`, which
+  `kernel.yml` writes, and once from `GRUB_CMDLINE_LINUX_DEFAULT="pci=realloc=off"`
+  in `/etc/default/grub`, which nothing in the repo writes. Most likely
+  the Ubuntu installer copied it from its own boot line (options after
+  `---` are kept in the installed system), so IT may have needed it to boot
+  the installer on herakles; ask IT. The duplicate is harmless, but the
+  option stays on the node even if `kernel_cmdline_gpu` is removed from
+  `config/host_vars/herakles`. atlas, kosmos and aristarchus boot without
+  extra options; gaia and the second wave are not checked yet. When all
+  twelve are in, check every host (read-only, no sudo):
+  `ansible -k -m command -a 'grep -n CMDLINE_LINUX_DEFAULT /etc/default/grub' all`.
+  Then either let `kernel.yml` set `GRUB_CMDLINE_LINUX_DEFAULT=""` (removes
+  such leftovers everywhere and keeps them out, but also anything IT puts
+  there on purpose, e.g. a serial console; the reboot it triggers needs a
+  drain), or, if only herakles has one, leave it and note it in
+  `config/host_vars/herakles`. No hand edits on the nodes in the meantime
+  (admins' decision).
 
 ### Configless Slurm (follow-up after go-live, decided 2026-10-01)
 
