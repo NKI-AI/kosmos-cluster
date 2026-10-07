@@ -75,7 +75,10 @@ partition_settings:
     slurm_max_job_timelimit: 10080
     default: false
   h100:
-    slurm_def_mem_per_cpu: 10000
+    # kosmos: herakles has 192 CPUs and RealMemory 1470391 MB (1470391 / 192
+    # = 7658). 10000 asked 1.92 TB for an --exclusive job without --mem
+    # (rejected) and fit only 6 of 8 single-GPU jobs (24 CPUs each).
+    slurm_def_mem_per_cpu: 7600
     slurm_def_cpu_per_gpu: 24
     slurm_allow_qos: h100_qos,four_h100_qos,eight_h100_qos
     slurm_max_job_timelimit: 10080

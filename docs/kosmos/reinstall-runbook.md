@@ -266,8 +266,21 @@ That is harmless; power it off or ignore it.
      --allow-unavailable-nodes --partition a6000` until all twelve hosts are
      in (the default partition, rtx2080ti, is not in the first batch, and no
      partition allows the `normal` QOS); `ok: true`, `gpu_job_ok: true`.
-   - A job in every partition with each of its QOS; a job with a QOS the
-     partition does not allow is rejected.
+   - A job in every partition with each of its QOS. A job with a QOS the
+     partition does not allow, or a time limit above the partition's
+     `MaxTime`, is accepted by `sbatch` and stays PENDING ("Job's QOS not
+     permitted to use this partition", `PartitionTimeLimit`) until it is
+     cancelled; it never runs. `EnforcePartLimits` is not set (section 2 of
+     the porting notes); `scancel` the test job.
+   - Memory: `srun -p cpu --qos cpu_qos --mem=1G python3 -c "b = b'x' *
+     (3 << 30)"` is OOM-killed (`sacct` state `OUT_OF_MEMORY`) instead of
+     swapping and finishing COMPLETED; gaia has swap (deviation 46). On
+     herakles, `sbatch --exclusive -p h100 --qos eight_h100_qos
+     --gres=gpu:8 --wrap true` without `--mem` is accepted and runs
+     (deviation 47).
+   - CPUs per GPU: `srun -p a6000 --qos a6000_qos --gres=gpu:1 nproc` prints
+     16 (the partition's `DefCpuPerGPU`), not 32, and eight 1-GPU jobs run
+     at the same time on one 8-GPU node (deviation 48).
    - ssh to a compute node without a job is refused for a normal user and
      works for an admin (pam_slurm_adopt, `/etc/localgroups`); files a job
      leaves in `/tmp` are gone after it ends (epilog; no `squeue failed` in
@@ -394,6 +407,13 @@ Changes that can break existing scripts (Slurm release notes 23.11-26.05):
 - NVIDIA driver 580 on every GPU node (CUDA 13 capable; older CUDA
   containers keep working).
 - Apptainer 1.5.4 on every compute node (not on kosmos).
+- A job that uses more memory than it asked for (`--mem`, or the partition
+  default per CPU) is killed (`OUT_OF_MEMORY`) instead of swapping. On h100
+  the default is 7600 MB per CPU (was 10000).
+- A GPU job without `-c` gets the partition's CPUs per GPU (16 on a6000 and
+  a100, 24 on h100), as on the old cluster. Tasks of a multi-task job
+  (`-n`) may now share a core's two hardware threads; MPI jobs that want a
+  whole core per task add `--hint=nomultithread`.
 - `nodestat` stays, with fixes: array jobs show their GPUs and memory,
   `nodestat -g` shows GPUs in use, drained/down nodes are labelled as such,
   memory is in GiB like Slurm (numbers look about 2 % smaller).
