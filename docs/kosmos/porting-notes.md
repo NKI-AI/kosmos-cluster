@@ -500,6 +500,8 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 47 | `config/group_vars/slurm-cluster.yml` (`partition_settings.h100`) | `slurm_def_mem_per_cpu: 7600` | 10000 | herakles has 192 CPUs and RealMemory 1470391 MB, 7658 MB per CPU. With 10000 an `--exclusive --gres=gpu:8` job without `--mem` asked for 1.92 TB and was refused ("Requested node configuration is not available"), and with `DefCpuPerGPU=24` a single-GPU job got 240 GB by default, so only 6 fit on the 8-GPU node (stress test 2026-10-07; with the CPU doubling of deviation 48 it was 48 CPUs and 480 GB). 192 x 7600 = 1459200 MB leaves 11 GB of margin, which covers RealMemory moving by a few MB between boots (it is 95 % of the memory fact); eight 24-CPU jobs fit. Every other partition stays under its nodes' RealMemory (closest: roentgen, 40 x 6000 = 240000 of 244899). Flip: set 10000 back | 2026-10-07 |
 | 48 | `roles/slurm/templates/etc/slurm/slurm.conf` (`SelectTypeParameters`) | `CR_Core_Memory,CR_CORE_DEFAULT_DIST_BLOCK` | the same plus `CR_ONE_TASK_PER_CORE` (upstream since 5fcf1bf4, 2020; also master) | Stress test 2026-10-07: a 1-GPU job got twice the partition's `DefCpuPerGPU` (a6000 32 instead of 16, h100 48 instead of 24), so 1-GPU jobs ran out of CPUs at half the GPUs (herakles: four jobs took all 192 CPUs, four H100s idle); on a busy node the count shrank again, so it also depended on load. On 23.02 a 1-GPU a6000 job got 16 (admins). Slurm 23.11 added a step that turns the CPUs per GPU into that many tasks (`gres_filter.c`, "Limit max_tasks_this_node per the cpus_per_gres request"), and `CR_ONE_TASK_PER_CORE` makes every task a whole core of two threads. SchedMD closed the same report as invalid (ticket 14975, 22.05), so no fix is coming. Without the option `DefCpuPerGPU` and `--cpus-per-gpu` count hardware threads again. Side effect: tasks of a multi-task job (`-n N -c 1`) may share a core's two threads; `--hint=nomultithread` or `--ntasks-per-core=1` restores one per core. Rejected: halving `DefCpuPerGPU` (load-dependent, and `--cpus-per-gpu` still doubles) and `CPUs=` set to the cores (every CPU count, limit and QOS halves). Needs slurmctld and slurmd restarted (every run does). Revisit if multi-task jobs suffer. Flip: add the option back | 2026-10-07 |
 | 49 | `roles/slurm/templates/etc/slurm/slurm.conf`, `roles/slurm/defaults/main.yml`, `roles/slurm/tasks/controller.yml`, `config/group_vars/slurm-cluster.yml` | site config sets `priority/multifactor` (role default `priority/basic`); weights are `slurm_priority_weights` (Age=1000, others 0); `SchedulerParameters` from `slurm_scheduler_parameters` (`bf_window=43200`); `AccountingStorageEnforce` unchanged (`associations,limits,qos`; `accrue` is not a value Slurm 26.05 accepts: on 2026-10-07 it made `sacctmgr`, `scontrol` and the daemons refuse `slurm.conf`, and `MaxJobsAccrue` is an association limit enforced through `limits`); `slurm_accounts_managed` creates `aifo`/`radiology`/`mann`/`compute-account` and sets `MaxJobsAccrue=2` (not root/QOS/users) | template hardcoded `PriorityType=priority/basic` and commented example weights (deviation 23); no SchedulerParameters (Slurm backfill defaults, including `bf_window=1440`) | Age-only multifactor so pending jobs climb for one day (integer resolution: ~86 s per point at weight 1000) then cap; ties fall to submit time. Age does not accrue while held or dependent. At most two pending jobs per user accrue Age, so a bulk submit does not age all thirty. Fair share, QOS ranks, TRES/assoc weights, partition PriorityJobFactor, DefaultTime, AccountingStorageTRES and preemption stay as they were. Backfill looks 30 days ahead so a 7- or 30-day job can still fill a hole. Flip: `slurm_priority_type: priority/basic`, delete `slurm_scheduler_parameters` and `slurm_max_jobs_accrue` | 2026-10-07 |
+| 50 | `roles/slurm/defaults/main.yml` (`slurm_conf_validate`), `roles/slurm/tasks/{controller,compute,misc-node}.yml` | every `slurm.conf` template task has `validate: env SLURM_CONF=%s <prefix>/bin/scontrol show hostnames localhost`: Slurm's own parser checks the rendered file before it is written; on an error the task fails and the old file stays | written unchecked | 2026-10-07 deploy: an invalid `AccountingStorageEnforce` value (`accrue`, deviation 49) reached `/sw/.slurm/slurm.conf`; every client and daemon refused the file and `pam_slurm_adopt` ended every ssh login to the compute nodes, Ansible's included ("Admin lockout"). Syntax check and ansible-lint do not parse Slurm values. `scontrol` parses the whole file at start-up and exits 1 on a rejected value; `show hostnames` needs no slurmctld (checked: rc 0 with an unreachable `SlurmctldHost`, rc 1 for `accrue` and for a bad `SelectTypeParameters` token). Does not check `gres.conf`, `cgroup.conf` or values Slurm only rejects at daemon start. Flip: set `slurm_conf_validate` to a command that always succeeds, or remove the `validate:` lines | 2026-10-07 |
+| 51 | `roles/slurm/tasks/compute.yml` (both `/etc/pam.d/sshd` blocks) | the `pam_listfile` lines for `/etc/localusers` and `/etc/localgroups` come before `pam_slurm_adopt` | `pam_slurm_adopt` (`action_no_jobs=ignore`) first, admins after it | Part 1 of the fix in "Admin lockout through pam_slurm_adopt": `pam_slurm_adopt` calls `fatal()` inside sshd when it cannot read `slurm.conf`, so the admin lines were never reached and admins were locked out with everyone else (2026-10-05 `/sw` gone, 2026-10-07 invalid value). A `sufficient` success ends the account stack, so admins never run Slurm code at login. Users are unchanged (adopted with a job, refused without). Cost: an admin's ssh session is not adopted into the cgroup of their own job on that node. The `blockinfile` markers are unchanged, so a run replaces the block in place. Flip: put the `pam_slurm_adopt ... action_no_jobs=ignore` line first again | 2026-10-07 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -576,9 +578,12 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   first run from env-26.07. Check runs are unaffected. (Earlier blocker,
   admin login to kosmos, was restored by IT on 2026-09-08; step 6 of
   "Before the first run" is done.)
-- **High, after go-live: admins locked out of every compute node when
-  `slurm.conf` cannot be read** (incident 2026-10-05). See "Admin lockout
-  through pam_slurm_adopt" below.
+- **Part 1 done 2026-10-07 (deviation 51), part 2 after go-live: admins
+  locked out of every compute node when `slurm.conf` cannot be read**
+  (incidents 2026-10-05 and 2026-10-07). Admins now come first in the PAM
+  stack; the controller also refuses to write a `slurm.conf` Slurm cannot
+  parse (deviation 50). Left: take kronos out of the path (part 2 below).
+  See "Admin lockout through pam_slurm_adopt" below.
 - **After go-live, not blocking: configless Slurm.** See "Configless Slurm"
   below.
 - **After go-live, not blocking: fair share (and later QOS ranks).**
@@ -766,9 +771,17 @@ Recovery on a node: get `slurm.conf` readable again, e.g. from the BMC
 console (`umount -l /sw && mount /sw`) or a reboot once kronos exports
 `/sw` again. ssh works as soon as the file is readable.
 
+Second time, 2026-10-07: the deploy wrote a `slurm.conf` with an invalid
+value (`AccountingStorageEnforce=...,accrue`, deviation 49). Same symptom
+(`Connection closed by UNKNOWN port 65535` for everyone, Ansible included),
+same mechanism (`fatal()` on a config error). Fixed by correcting the file on
+atlas (`runuser -u slurm -- sed -i ...` on `/sw/.slurm/slurm.conf`); ssh
+worked again at once. Since then the controller checks a rendered
+`slurm.conf` with `scontrol` before writing it (deviation 50).
+
 Fix, two parts:
 
-1. **Admins first in the PAM stack.** Move the two `pam_listfile` lines
+1. **Done 2026-10-07 (deviation 51). Admins first in the PAM stack.** Move the two `pam_listfile` lines
    above the first `pam_slurm_adopt` line in both blocks of
    `roles/slurm/tasks/compute.yml` (the `blockinfile` markers stay, so a
    run replaces the block in place). A `sufficient` success ends the stack,

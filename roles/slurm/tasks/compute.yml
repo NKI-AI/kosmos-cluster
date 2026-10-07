@@ -102,6 +102,7 @@
     src: "{{ slurm_conf_template }}"
     dest: "{{ slurm_config_dir }}/slurm.conf"
     mode: "0644"
+    validate: "{{ slurm_conf_validate }}"
   when: not slurm_conf_symlink
   notify:
   - restart slurmd
@@ -201,13 +202,18 @@
   - slurm_enable_pam_slurm_adopt
   - not slurm_pam_adopt_module.stat.exists or not (slurm_pam_adopt_module.stat.isreg | default(false))
 
+# kosmos: admins (/etc/localusers, /etc/localgroups) come before
+# pam_slurm_adopt. pam_slurm_adopt reads slurm.conf inside sshd and calls
+# fatal(), ending the login, when it cannot (2026-10-05: /sw gone; 2026-10-07:
+# invalid value). A sufficient success ends the stack, so admins never load
+# Slurm code at login. Cost: an admin's ssh is not adopted into their own job.
 - name: configure /etc/pam.d/sshd to restrict node access without jobs
   blockinfile:
     path: /etc/pam.d/sshd
     block: |
-      -account sufficient {{ slurm_pam_lib_dir }}/pam_slurm_adopt.so action_no_jobs=ignore
       -account sufficient pam_listfile.so item=user sense=allow file=/etc/localusers
       -account sufficient pam_listfile.so onerr=fail item=group sense=allow file=/etc/localgroups
+      -account sufficient {{ slurm_pam_lib_dir }}/pam_slurm_adopt.so action_no_jobs=ignore
       -account required {{ slurm_pam_lib_dir }}/pam_slurm_adopt.so
     insertafter: EOF
     marker: "# {mark} ANSIBLE MANAGED BLOCK (ansible-role-slurm)"
@@ -221,9 +227,9 @@
   blockinfile:
     path: /etc/pam.d/sshd
     block: |
-      -account sufficient {{ slurm_pam_lib_dir }}/pam_slurm_adopt.so action_no_jobs=ignore
       -account sufficient pam_listfile.so item=user sense=allow file=/etc/localusers
       -account sufficient pam_listfile.so onerr=fail item=group sense=allow file=/etc/localgroups
+      -account sufficient {{ slurm_pam_lib_dir }}/pam_slurm_adopt.so action_no_jobs=ignore
     insertafter: EOF
     marker: "# {mark} ANSIBLE MANAGED BLOCK (ansible-role-slurm)"
   tags:

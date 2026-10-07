@@ -18,6 +18,12 @@ slurm_config_dir: /etc/slurm
 slurmctl_config_dir: /sw/.slurm
 slurm_sysconf_dir: /etc/sysconfig
 slurm_install_prefix: /usr/local
+# kosmos: every slurm.conf template is checked with Slurm's own parser before
+# it is written: scontrol reads the whole file at start-up and exits 1 on a
+# value Slurm rejects, and "show hostnames" needs no slurmctld. An invalid
+# slurm.conf stops every client and daemon, and pam_slurm_adopt with it
+# (2026-10-07: "accrue"), so the task fails instead and the old file stays.
+slurm_conf_validate: "env SLURM_CONF=%s {{ slurm_install_prefix }}/bin/scontrol show hostnames localhost"
 slurm_cuda_prefix: /usr/local/cuda
 # kosmos: --with-json --with-yaml make configure fail when json-c or libyaml
 # is missing instead of building without --json/--yaml

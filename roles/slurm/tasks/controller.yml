@@ -131,6 +131,7 @@
     src: "{{ slurm_conf_template }}"
     dest: "{{ slurm_config_dir }}/slurm.conf"
     mode: "0644"
+    validate: "{{ slurm_conf_validate }}"
   when: not slurm_conf_symlink
   notify:
   - restart slurmctld
@@ -149,6 +150,7 @@
     src: "{{ slurm_conf_template }}"
     dest: "{{ slurm_config_dir }}/slurm.conf.shared"
     mode: "0644"
+    validate: "{{ slurm_conf_validate }}"
   register: slurm_conf_rendered
   when: slurm_conf_symlink
   notify:

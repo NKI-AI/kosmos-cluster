@@ -16,6 +16,7 @@
     src: "{{ slurm_conf_template }}"
     dest: "{{ slurm_config_dir }}/slurm.conf"
     mode: "0644"
+    validate: "{{ slurm_conf_validate }}"
   when: not slurm_conf_symlink
   tags:
   - config
