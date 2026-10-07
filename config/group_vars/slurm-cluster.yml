@@ -37,9 +37,9 @@ slurm_priority_type: priority/multifactor
 slurm_accounting_storage_enforce: associations,limits,qos,accrue
 slurm_max_jobs_accrue: 2
 slurm_accounts:
-  - aiforoncology
+  - aifo
   - radiology
-  - nki-ai
+  - mann
 slurm_admin_account: compute-account
 slurm_scheduler_parameters:
   - bf_interval=30
