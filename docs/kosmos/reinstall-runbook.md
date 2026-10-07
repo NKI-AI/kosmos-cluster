@@ -38,13 +38,17 @@ Rules for every step:
   env, or the munge keys differ.
 - One admin runs the playbooks, the others help with problems: two runs at
   the same time both rewrite `slurm.conf` and restart slurmctld.
-- Every command uses `-kK` (ssh password, sudo password): a reinstalled
-  host may not have a Kerberos host principal yet. atlas has one since the
-  reinstall (2026-10-07), so runs on atlas alone work without `-k`.
-- **Every Slurm run includes atlas** (`-l atlas,<nodes>`). Compute nodes read
+- Every command uses `-K` (sudo password). ssh is Kerberos, including atlas
+  (joined the realm 2026-10-07). A host with no principal yet still needs
+  `-k` as well (`kvno host/<hostname>.rhpc.nki.nl`).
+- **Every Slurm run includes atlas** (`-l atlas,<nodes>` or
+  `-l <newnode>,slurm-master`). Compute nodes read
   `slurm.conf` from `/sw/.slurm`, which only the controller play writes, and
   a node joins `slurm.conf` in the run that first reaches it (deviation 26).
-  During the batches that needs `-e slurm_nodes_allow_unreachable=true`;
+  After go-live, adding one node is that command with the rest of the
+  cluster up and without `slurm_nodes_allow_unreachable`. During the
+  reinstall batches the extra is
+  `-e slurm_nodes_allow_unreachable=true`;
   without it a run stops when any Slurm node is unreachable, so that after
   go-live a node that is briefly down is not dropped from `slurm.conf` with
   its jobs. A node that answers but whose sudo fails also stops the run:
@@ -196,8 +200,8 @@ That is harmless; power it off or ignore it.
 1. Reachability and Secure Boot:
 
    ```bash
-   ansible -kK -m ping -l N all
-   ansible -kK -b -m command -a 'mokutil --sb-state' -l N slurm-node
+   ansible -m ping -l N all
+   ansible -K -b -m command -a 'mokutil --sb-state' -l N slurm-node
    ```
 
    (The second command says "no hosts matched" for a batch without compute
@@ -211,14 +215,14 @@ That is harmless; power it off or ignore it.
 2. Kernel, alone first to isolate kernel problems (also part of step 3):
 
    ```bash
-   ansible-playbook -kK --flush-cache playbooks/generic/kernel.yml -l N
+   ansible-playbook -K --flush-cache playbooks/generic/kernel.yml -l N
    ```
 
    Ends with the running kernel per host: `7.0.0-*`.
 3. Everything else:
 
    ```bash
-   ansible-playbook -kK playbooks/slurm-cluster.yml -l atlas,N -e slurm_nodes_allow_unreachable=true
+   ansible-playbook -K playbooks/slurm-cluster.yml -l atlas,N -e slurm_nodes_allow_unreachable=true
    ```
 
    Driver 580 (and fabric manager on herakles), DCGM 4, Slurm 26.05.4 build,
@@ -316,7 +320,7 @@ That is harmless; power it off or ignore it.
 
 ## 3. Go-live (all twelve hosts deployed)
 
-1. `ansible-playbook -kK playbooks/slurm-cluster.yml` (without
+1. `ansible-playbook -K playbooks/slurm-cluster.yml` (without
    `slurm_nodes_allow_unreachable` from now on), then again: converged on
    every host, no unreachable node.
 2. Scratch cross-mounts: every scratch node exports its `/processing` to
@@ -325,7 +329,7 @@ That is harmless; power it off or ignore it.
    up, so once here:
 
    ```bash
-   ansible-playbook -kK playbooks/slurm-cluster/mount_scratch_disks.yml
+   ansible-playbook -K playbooks/slurm-cluster/mount_scratch_disks.yml
    ```
 
    Check on gaia: `findmnt -t nfs4 | grep processing` lists one mount per
@@ -338,7 +342,7 @@ That is harmless; power it off or ignore it.
    to the secrets file (`docs/kosmos/slurm-secrets.md`), then:
 
    ```bash
-   ansible-playbook -kK playbooks/slurm-cluster/monitoring.yml | tee ~/monitoring-atlas.log
+   ansible-playbook -K playbooks/slurm-cluster/monitoring.yml | tee ~/monitoring-atlas.log
    ```
 
    Check: `http://atlas:3000` asks for a login (anonymous access is off),

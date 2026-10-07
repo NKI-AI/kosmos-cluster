@@ -11,7 +11,7 @@
 # so the default wins and [slurm-metric] is empty (--list-hosts, 2026-10-07).
 # Here hostlist is a play variable, which is visible.
 #
-#   ansible-playbook -kK playbooks/slurm-cluster/monitoring.yml
+#   ansible-playbook -K playbooks/slurm-cluster/monitoring.yml
 #
 # Needs grafana_admin_password in the secrets file
 # (docs/kosmos/slurm-secrets.md). Grafana reads admin_password only when it

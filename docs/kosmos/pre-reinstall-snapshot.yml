@@ -3,7 +3,7 @@
 # clean install loses to the Ansible node, so the reinstalled nodes can be
 # compared with the old ones and nothing hand-made is lost silently.
 #
-#   ansible-playbook -kK docs/kosmos/pre-reinstall-snapshot.yml
+#   ansible-playbook -K docs/kosmos/pre-reinstall-snapshot.yml
 #
 # Read-only on the hosts except a scratch directory under /var/tmp, which is
 # removed at the end. Output: ~/reinstall-snapshot/<host>/ on the Ansible node

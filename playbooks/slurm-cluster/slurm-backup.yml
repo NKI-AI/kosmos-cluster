@@ -7,11 +7,11 @@
 # the controller. Ported from branch slurm-upgrade-26.04 (Tim Veenboer)
 # without its upgrade playbook.
 #
-#   ansible-playbook -kK -l atlas playbooks/slurm-cluster/slurm-backup.yml
-#   ansible-playbook -kK playbooks/slurm-cluster/slurm-backup.yml \
+#   ansible-playbook -K -l atlas playbooks/slurm-cluster/slurm-backup.yml
+#   ansible-playbook -K playbooks/slurm-cluster/slurm-backup.yml \
 #       -e slurm_backup_stop_slurmdbd=true -e slurm_backup_nodes=true
 #
-# -k: atlas takes a password, not the Kerberos ticket. -K: sudo password.
+# -K: sudo password. ssh is Kerberos (atlas included, 2026-10-07).
 #
 # The database dump is only consistent when slurmdbd is stopped
 # (slurm_backup_stop_slurmdbd). While it is stopped, slurmctld queues its

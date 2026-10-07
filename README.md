@@ -13,7 +13,8 @@
 > ansible-galaxy install -r roles/requirements.yml
 > ```
 >
-> ssh to the nodes uses your Kerberos ticket, no keys. It expires after about a day: if
+> ssh to the nodes uses your Kerberos ticket, no keys (atlas included,
+> 2026-10-07). It expires after about a day: if
 > `klist` shows nothing or Ansible reports every host `UNREACHABLE ... Permission denied`,
 > run `kinit` and retry.
 >
@@ -36,6 +37,17 @@
 > - `config/host_vars/<host>`: only if the node needs something different from the
 >   rest, such as a driver branch pin (`nvidia_driver_branch`). Most nodes need no
 >   file. GPUs and their CPU affinity come from the node itself, not from here.
+>
+> Then deploy it (must include the controller so it is written into `slurm.conf`):
+>
+> ```bash
+> ansible-playbook -K playbooks/slurm-cluster.yml -l <newnode>,slurm-master
+> ```
+>
+> The other `slurm-node` hosts must be reachable: atlas still gathers their
+> facts for `slurm.conf`. Do not pass `slurm_nodes_allow_unreachable` for this;
+> that flag is only for reinstall batches and would drop unreachable nodes from
+> `slurm.conf`. A first run on a reimaged host should use `--flush-cache`.
 >
 > `slurm.conf` is rendered from these on the controller by
 > `playbooks/slurm-cluster/slurm.yml`; `docs/kosmos/render-slurm-conf.yml` renders it

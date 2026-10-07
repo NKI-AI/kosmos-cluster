@@ -1,5 +1,10 @@
 ---
 # Slurm Cluster Playbook
+#
+# Add a node (after inventory):
+#   ansible-playbook -K playbooks/slurm-cluster.yml -l <newnode>,slurm-master
+# slurm-master must be in the limit (controller play writes slurm.conf).
+# Other slurm-nodes must be reachable; do not use slurm_nodes_allow_unreachable.
 
 - name: Install python required for Ansible
   import_playbook: bootstrap/bootstrap-python.yml

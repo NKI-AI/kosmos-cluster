@@ -7,7 +7,7 @@ point: DeepOps 23.08, commit d248b658). Contents:
 - **Before the first run**: the test recipe.
 - **Check-run results**: what each `--check --diff` run showed, per date and node.
 - **Running playbooks from teuwen-ansible**: how ssh authentication works
-  (Kerberos, not keys), which hosts are the exception, ticket expiry.
+  (Kerberos, not keys), ticket expiry, `-K` for sudo.
 - **1. Conscious deviations from master**: every place where the branch
   deliberately differs from `master`, why, and the commit. Other admins can
   review each row and flip it back if they disagree.
@@ -22,16 +22,15 @@ not applied; they go into section 2.
 pass, `--check --diff` done on all compute nodes except gaia for the
 non-Slurm playbooks (see "Check-run results"), rendered slurm.conf matches
 the live one. **Admin login to kosmos works again (2026-09-08, fixed by
-IT), with Kerberos**, so `slurm.yml` is no longer blocked; atlas then
-still needed `-k` (no host principal in the realm until the reinstall, see
-"Running playbooks from teuwen-ansible"). gaia's open-files problem is bypassed by gathering only
+IT), with Kerberos**, so `slurm.yml` is no longer blocked. atlas is in the
+realm too (2026-10-07): playbooks need `-K` (sudo), not `-k`. gaia's
+open-files problem is bypassed by gathering only
 the `min` fact subset (096cc2ec). Decided: docker pinned to 28.3
 (deviation 13), motd landscape task removed, nvtop pinned to 3.3.2
 (deviation 15), landscape-sysinfo replaced by a shell script in the motd
 role (deviation 17, 2026-09-16), apptainer pinned to 1.5.4 on the compute
 nodes (deviation 22, 2026-09-30). Still pending with the admins: herakles driver
-metapackages/reboot, podman-docker on herakles, joining
-atlas to the realm. Everything on
+metapackages/reboot, podman-docker on herakles. Everything on
 `master` up to e812a659 has been ported, dropped with a row below, or
 superseded upstream.
 
@@ -73,9 +72,9 @@ Do these in order, on teuwen-ansible. Steps 1 and 2 are done (2026-09-04).
 4. herakles: included in the tests as a normal node (decided 2026-09-04;
    see section 2, "Site config" for what a real run would change on it).
 5. `ansible-playbook playbooks/slurm-cluster.yml --syntax-check`.
-6. `ansible-playbook -kK --check --diff --limit atlas,kosmos,herakles playbooks/slurm-cluster/slurm.yml`
-   (`-k` for atlas: the first play gathers facts from every inventory host,
-   so the password is needed even with a limit). Was blocked 2026-09-04
+6. `ansible-playbook -K --check --diff --limit atlas,kosmos,herakles playbooks/slurm-cluster/slurm.yml`
+   (`-K` for sudo; ssh is Kerberos, including atlas since 2026-10-07).
+   Was blocked 2026-09-04
    because kosmos refused admin accounts; **unblocked 2026-09-08**, see
    "Running playbooks from teuwen-ansible". Include atlas: with
    `slurm_conf_symlink: true` slurm.conf is rendered only there, into
@@ -110,8 +109,9 @@ are joined to the `RHPC.NKI.NL` realm (sssd). Logging in gives you a ticket
 (`klist`), and ssh authenticates with it over GSSAPI (`ssh -v gaia true`
 shows `Authenticated to gaia using "gssapi-with-mic"`). Ansible runs the
 same ssh, so it connects the same way: an ad-hoc `ansible gaia,herakles -m
-ping` succeeds with no key file and no `-k`. Nobody needs to generate or
-distribute ssh keys for the compute nodes, and every admin keeps their own
+ping` succeeds with no key file and no `-k`, including atlas (joined
+2026-10-07). Nobody needs to generate or
+distribute ssh keys for the cluster hosts, and every admin keeps their own
 identity for free.
 
 - **Tickets expire after about a day** (see the `krbtgt` line in `klist`).
@@ -128,23 +128,13 @@ identity for free.
   this branch by dropping the override (deviation 0c): sockets now go to
   `~/.ansible/cp`, which Ansible creates itself. No key pair is needed either
   (the one upstream play that wanted a `.pub` file is off, see below).
-- **atlas was the exception until the reinstall: it had no host principal
-  in the realm.** Since the reinstall (reported by the admins 2026-10-07)
-  atlas is joined to the realm and needs no `-k`; check with
-  `kvno host/atlas.rhpc.nki.nl` on teuwen-ansible, which must return a
-  ticket. The rest of this item is the state before. Its
-  sshd offers GSSAPI, but the KDC has no key for it, so no service ticket
-  can be issued and ssh falls through to password. Verified 2026-09-08:
-  `kvno host/atlas.rhpc.nki.nl` answers "Server
-  host/atlas.rhpc.nki.nl@RHPC.NKI.NL not found in Kerberos database", while
-  the same request for kosmos and every compute node returns a ticket. DNS
-  is fine (atlas resolves in `rhpc.nki.nl` like the others). Runs that
-  touch atlas need `-k`. `--limit gaia` no longer SSHes atlas for facts;
-  the slurm.conf gatherer still SSHes every `slurm-node`, and any play
-  that includes atlas (controller, full `slurm.yml`) still needs `-k`.
-  The fix is to join atlas to the realm (host principal plus keytab, as
-  sssd did on the compute nodes); needs root on atlas and possibly IT.
-  Fallback: a key in your `authorized_keys` on atlas.
+- **atlas is in the realm (2026-10-07).** Until then it had no
+  `host/atlas.rhpc.nki.nl` principal (`kvno` failed, ssh fell through to
+  a password, playbooks needed `-k`). It uses GSSAPI like kosmos and the
+  compute nodes; playbooks that include atlas need only `-K`. A newly
+  imaged host can lack a principal again until IT enrols
+  `host/<hostname>.rhpc.nki.nl` and a keytab: `kvno host/<hostname>.rhpc.nki.nl`
+  then `-k` for that host only.
 - **kosmos: fixed 2026-09-08.** From 2026-09-04 until then kosmos refused
   admin `-ans` accounts altogether (PAM denied the account with password
   and Kerberos alike; regular users got in), which blocked `slurm.yml`
@@ -155,8 +145,17 @@ identity for free.
   `host/kosmos.rhpc.nki.nl` ticket). The earlier note that kosmos
   "rejects the ticket" was this same outage, not a Kerberos problem:
   kosmos does not need `-k`. Fact gathering no longer targets kosmos.
-- **Sudo on the nodes needs a password**: always `-K`. Same password as for
-  `-k`.
+- **Sudo on the nodes needs a password**: always `-K`.
+- **Adding a compute node** (inventory already lists it under `[all]`,
+  `[slurm-node]`, one `[partition_*]`, and `[scratch-node]` if it has a
+  local disk): `ansible-playbook -K playbooks/slurm-cluster.yml -l
+  <newnode>,slurm-master`. `--limit` applies to every imported play, so
+  without `slurm-master` (or `atlas`) the controller play is skipped and
+  `slurm.conf` is not updated; slurmd then fails with "Unable to determine
+  this slurmd's NodeName". The gatherer on atlas still SSHes every
+  `slurm-node`, so the rest of the cluster must be up. Do not use
+  `slurm_nodes_allow_unreachable` here (reinstall batches only): it would
+  omit unreachable NodeNames. `--flush-cache` on a reimaged host.
 - Node home directories are NFS from rhea, shared by all nodes; an
   `authorized_keys` entry made on one node applies to all of them. Your home
   on teuwen-ansible is separate.
@@ -172,9 +171,8 @@ identity for free.
   Nothing needs it: no playbook logs in as root, and pam_slurm_adopt does not
   block admins because their groups are in `/etc/localgroups`.
 - `playbooks/bootstrap/bootstrap-ssh.yml` installs the admin's key on all
-  hosts so that `-k` is not needed. With Kerberos that is redundant for the
-  compute nodes; keep it disabled (it is, see section 2). If atlas cannot be
-  joined to the realm, a key on that one host is the fallback.
+  hosts so that `-k` is not needed. With Kerberos that is redundant; keep
+  it disabled (it is, see section 2).
 
 **Environments on teuwen-ansible (until the branch is merged):**
 `/opt/kosmos-cluster/env` (ansible-core 2.16, master, other admins) and
@@ -561,7 +559,7 @@ issues were removed; corrections are marked "corrected 2026-09-08".
 - **High, after the reinstall: make the repository private** (decided
   2026-10-01). `NKI-AI/kosmos-cluster` is public. No secret values are in
   it (deviation 30), but it maps the cluster: hostnames, partitions, admin
-  group names, NFS servers, that atlas had no Kerberos host principal, and
+  group names, NFS servers, and
   that the 23.02 cluster's munge key is derived from the public DeepOps
   placeholder (true until the reinstall). It is a GitHub fork of
   `NVIDIA/deepops`, and GitHub does not switch a public fork to private:
@@ -578,10 +576,6 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   first run from env-26.07. Check runs are unaffected. (Earlier blocker,
   admin login to kosmos, was restored by IT on 2026-09-08; step 6 of
   "Before the first run" is done.)
-- **Done 2026-10-07, Ansible node access:** atlas had no Kerberos host
-  principal, so any `slurm.yml` run that included atlas needed `-k`. Since
-  the reinstall it is joined to the realm (see "Running playbooks from
-  teuwen-ansible").
 - **High, after go-live: admins locked out of every compute node when
   `slurm.conf` cannot be read** (incident 2026-10-05). See "Admin lockout
   through pam_slurm_adopt" below.
@@ -802,9 +796,9 @@ one-off grub fix, the vault/munge rollout onto running nodes, the stepped
 23.02 -> 24.11 -> 26.05 upgrade, the docker upgrade on gaia and eudoxus,
 podman-docker on herakles) no longer apply. The order of work is in
 `docs/kosmos/reinstall-runbook.md`. What remains of the items in this
-section: the first full run of `playbooks/slurm-cluster.yml`, now on
-freshly installed nodes (atlas's Kerberos host principal: done with the
-reinstall, 2026-10-07).
+section: the first full run of
+`playbooks/slurm-cluster.yml` on freshly installed nodes. atlas is in the
+Kerberos realm (2026-10-07).
 
 ### Slurm role (commit c9d86ffc)
 
@@ -886,7 +880,7 @@ reinstall, 2026-10-07).
   every generated host/path before changing either system file. This is a
   separate change from the shared kronos/rhea mounts.
 - Before widening the limit, check the shared-mount change separately on gaia,
-  atlas (`-kK`) and kosmos, and check the scratch change separately on gaia and
+  atlas (`-K`) and kosmos, and check the scratch change separately on gaia and
   `scratch-node`, always with `--check --diff`. Check mode cannot prove NFS
   reachability or a command-only mount/export action; those remain
   maintenance-window validation items.
@@ -1147,7 +1141,8 @@ area has several leftovers that need a decision (update or remove).
   site config sets `slurm_monitoring_group: "slurm-master"`, so a full run
   installs Prometheus, Grafana, Alertmanager and the slurm exporter on
   atlas, as docker containers. Whether they run there today is still
-  unverified -- atlas has no Kerberos host principal, so the check needs `-k`:
-  `ansible atlas -k -o -m shell -a 'systemctl is-active docker.prometheus.service docker.grafana.service'`.
+  unverified:
+  `ansible atlas -o -m shell -a 'systemctl is-active docker.prometheus.service docker.grafana.service'`
+  (`-K` if the check needs sudo).
   This matters because the node and dcgm exporters only have value if a
   Prometheus is scraping them.
