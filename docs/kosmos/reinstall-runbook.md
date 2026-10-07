@@ -38,8 +38,9 @@ Rules for every step:
   env, or the munge keys differ.
 - One admin runs the playbooks, the others help with problems: two runs at
   the same time both rewrite `slurm.conf` and restart slurmctld.
-- Every command uses `-kK` (ssh password, sudo password): atlas has no
-  Kerberos host principal, and the reinstalled hosts may not have one yet.
+- Every command uses `-kK` (ssh password, sudo password): a reinstalled
+  host may not have a Kerberos host principal yet. atlas has one since the
+  reinstall (2026-10-07), so runs on atlas alone work without `-k`.
 - **Every Slurm run includes atlas** (`-l atlas,<nodes>`). Compute nodes read
   `slurm.conf` from `/sw/.slurm`, which only the controller play writes, and
   a node joins `slurm.conf` in the run that first reaches it (deviation 26).

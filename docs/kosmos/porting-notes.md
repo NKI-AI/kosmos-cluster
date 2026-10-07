@@ -22,9 +22,9 @@ not applied; they go into section 2.
 pass, `--check --diff` done on all compute nodes except gaia for the
 non-Slurm playbooks (see "Check-run results"), rendered slurm.conf matches
 the live one. **Admin login to kosmos works again (2026-09-08, fixed by
-IT), with Kerberos**, so `slurm.yml` is no longer blocked; atlas still
-needs `-k` (no host principal in the realm, see "Running playbooks from
-teuwen-ansible"). gaia's open-files problem is bypassed by gathering only
+IT), with Kerberos**, so `slurm.yml` is no longer blocked; atlas then
+still needed `-k` (no host principal in the realm until the reinstall, see
+"Running playbooks from teuwen-ansible"). gaia's open-files problem is bypassed by gathering only
 the `min` fact subset (096cc2ec). Decided: docker pinned to 28.3
 (deviation 13), motd landscape task removed, nvtop pinned to 3.3.2
 (deviation 15), landscape-sysinfo replaced by a shell script in the motd
@@ -128,7 +128,11 @@ identity for free.
   this branch by dropping the override (deviation 0c): sockets now go to
   `~/.ansible/cp`, which Ansible creates itself. No key pair is needed either
   (the one upstream play that wanted a `.pub` file is off, see below).
-- **atlas is the exception: it has no host principal in the realm.** Its
+- **atlas was the exception until the reinstall: it had no host principal
+  in the realm.** Since the reinstall (reported by the admins 2026-10-07)
+  atlas is joined to the realm and needs no `-k`; check with
+  `kvno host/atlas.rhpc.nki.nl` on teuwen-ansible, which must return a
+  ticket. The rest of this item is the state before. Its
   sshd offers GSSAPI, but the KDC has no key for it, so no service ticket
   can be issued and ssh falls through to password. Verified 2026-09-08:
   `kvno host/atlas.rhpc.nki.nl` answers "Server
@@ -553,7 +557,7 @@ issues were removed; corrections are marked "corrected 2026-09-08".
 - **High, after the reinstall: make the repository private** (decided
   2026-10-01). `NKI-AI/kosmos-cluster` is public. No secret values are in
   it (deviation 30), but it maps the cluster: hostnames, partitions, admin
-  group names, NFS servers, that atlas has no Kerberos host principal, and
+  group names, NFS servers, that atlas had no Kerberos host principal, and
   that the 23.02 cluster's munge key is derived from the public DeepOps
   placeholder (true until the reinstall). It is a GitHub fork of
   `NVIDIA/deepops`, and GitHub does not switch a public fork to private:
@@ -570,10 +574,10 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   first run from env-26.07. Check runs are unaffected. (Earlier blocker,
   admin login to kosmos, was restored by IT on 2026-09-08; step 6 of
   "Before the first run" is done.)
-- **Ansible node access, not blocking:** atlas has no Kerberos host
-  principal, so any `slurm.yml` run that includes atlas still needs `-k`.
-  Join it to the realm
-  (see "Running playbooks from teuwen-ansible").
+- **Done 2026-10-07, Ansible node access:** atlas had no Kerberos host
+  principal, so any `slurm.yml` run that included atlas needed `-k`. Since
+  the reinstall it is joined to the realm (see "Running playbooks from
+  teuwen-ansible").
 - **High, after go-live: admins locked out of every compute node when
   `slurm.conf` cannot be read** (incident 2026-10-05). See "Admin lockout
   through pam_slurm_adopt" below.
@@ -780,9 +784,9 @@ one-off grub fix, the vault/munge rollout onto running nodes, the stepped
 23.02 -> 24.11 -> 26.05 upgrade, the docker upgrade on gaia and eudoxus,
 podman-docker on herakles) no longer apply. The order of work is in
 `docs/kosmos/reinstall-runbook.md`. What remains of the items in this
-section: atlas's
-Kerberos host principal (not a priority), and the first full run of
-`playbooks/slurm-cluster.yml`, now on freshly installed nodes.
+section: the first full run of `playbooks/slurm-cluster.yml`, now on
+freshly installed nodes (atlas's Kerberos host principal: done with the
+reinstall, 2026-10-07).
 
 ### Slurm role (commit c9d86ffc)
 
