@@ -34,7 +34,10 @@ slurm_enable_reconfig_on_restart: true
 # MaxJobsAccrue=2 on slurm_accounts_managed; user overrides are not reset.
 # bf_window=43200 matches cpu MaxTime (30d); default window is 1d.
 slurm_priority_type: priority/multifactor
-slurm_accounting_storage_enforce: associations,limits,qos,accrue
+# Not "accrue": Slurm 26.05 has no such AccountingStorageEnforce value and
+# every daemon and client refuses the file. MaxJobsAccrue is an association
+# limit, enforced through "limits".
+slurm_accounting_storage_enforce: associations,limits,qos
 slurm_max_jobs_accrue: 2
 slurm_accounts:
   - aifo
