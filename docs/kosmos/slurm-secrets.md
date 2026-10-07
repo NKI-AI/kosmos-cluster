@@ -34,6 +34,7 @@ overrides them.
   ---
   slurm_password: '<secret>'
   slurm_db_password: '<secret>'
+  grafana_admin_password: '<secret>'   # monitoring.yml only (deviation 45)
   ```
 
 - `/etc/profile.d/kosmos-slurm-secrets.sh` (0644, holds only the path):

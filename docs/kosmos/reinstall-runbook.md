@@ -318,7 +318,19 @@ That is harmless; power it off or ignore it.
    host in `scratch-node`.
 3. `python3 validate_slurm.py --json` (without `--allow-unavailable-nodes`)
    clean, every node idle, `sinfo -R` empty.
-4. `scontrol update nodename=ALL state=resume` if anything is still drained
+4. Monitoring server on atlas (Prometheus, Grafana, Alertmanager, Slurm
+   exporter). `slurm-cluster.yml` never installs it (deviation 45); the node
+   and DCGM exporters are already running. First add `grafana_admin_password`
+   to the secrets file (`docs/kosmos/slurm-secrets.md`), then:
+
+   ```bash
+   ansible-playbook -kK playbooks/slurm-cluster/monitoring.yml | tee ~/monitoring-atlas.log
+   ```
+
+   Check: `http://atlas:3000` asks for a login (anonymous access is off),
+   the Prometheus data source works, and `http://atlas:9090/targets` lists
+   the node and DCGM exporters of every deployed node as UP.
+5. `scontrol update nodename=ALL state=resume` if anything is still drained
    from testing; send the announcement.
 
 Fallbacks:

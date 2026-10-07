@@ -9,4 +9,6 @@ grafana_enabled: yes
 
 grafana_cfg_user: admin
 grafana_cfg_pass: deepops
+# kosmos: anonymous read-only access ([auth.anonymous]); upstream has it on.
+grafana_cfg_anonymous: true
 grafana_cfg_dashboard_path: "{{ grafana_data_dir }}/dashboards"

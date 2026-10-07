@@ -374,6 +374,13 @@ slurm_enable_monitoring: true
 # (Prometheus, Grafana, etc)
 slurm_monitoring_group: "slurm-master"
 
+# kosmos: server-side images, pinned here rather than in the role defaults so
+# a DeepOps update does not change them. Latest patch of the minor version
+# the 26.07 release pinned (grafana 13.1.0, prometheus v3.13.0); checked on
+# Docker Hub 2026-10-07. Installed by playbooks/slurm-cluster/monitoring.yml.
+grafana_container: "grafana/grafana:13.1.7"
+prometheus_container: "prom/prometheus:v3.13.4"
+
 ################################################################################
 # Logging with rsyslog                                                         #
 ################################################################################

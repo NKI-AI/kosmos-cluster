@@ -1,0 +1,41 @@
+---
+# kosmos: the monitoring server stack (Prometheus, Grafana, Alertmanager and
+# the Slurm exporter) on the controller, run on its own before go-live
+# (docs/kosmos/reinstall-runbook.md, step 3.4). Image versions are pinned in
+# config/group_vars/slurm-cluster.yml. The node and DCGM
+# exporters (hosts: all) come with slurm-cluster.yml.
+#
+# slurm-cluster.yml does not install this stack: its imports target
+# "{{ slurm_monitoring_group | default('slurm-metric') }}", but a play's hosts
+# are templated before any host is chosen, when group_vars are not visible,
+# so the default wins and [slurm-metric] is empty (--list-hosts, 2026-10-07).
+# Here hostlist is a play variable, which is visible.
+#
+#   ansible-playbook -kK playbooks/slurm-cluster/monitoring.yml
+#
+# Needs grafana_admin_password in the secrets file
+# (docs/kosmos/slurm-secrets.md). Grafana reads admin_password only when it
+# creates its database on the first start; to change it later use
+# `grafana cli admin reset-admin-password` in the container.
+
+- name: Monitoring | Prometheus
+  import_playbook: prometheus.yml
+  vars:
+    hostlist: slurm-master
+
+- name: Monitoring | Grafana
+  import_playbook: grafana.yml
+  vars:
+    hostlist: slurm-master
+    grafana_cfg_pass: "{{ (lookup('file', kosmos_slurm_secrets_file) | from_yaml).grafana_admin_password | mandatory }}"
+    grafana_cfg_anonymous: false
+
+- name: Monitoring | Alertmanager
+  import_playbook: alertmanager.yml
+  vars:
+    hostlist: slurm-master
+
+- name: Monitoring | Slurm exporter
+  import_playbook: prometheus-slurm-exporter.yml
+  vars:
+    hostlist: slurm-master
