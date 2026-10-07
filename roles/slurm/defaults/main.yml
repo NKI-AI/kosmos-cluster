@@ -77,6 +77,23 @@ slurm_conf_symlink: false
 # To avoid sharing nodes, set to "EXCLUSIVE"
 slurm_oversubscribe: "NO"
 
+# FIFO unless site config sets priority/multifactor. Weight keys are the
+# Slurm PriorityWeight* suffixes. Empty slurm_scheduler_parameters omits
+# the line (Slurm backfill defaults).
+slurm_priority_type: priority/basic
+slurm_priority_max_age: "1-0"
+slurm_priority_weights:
+  Age: 1000
+  Fairshare: 0
+  JobSize: 0
+  Partition: 0
+  QOS: 0
+slurm_scheduler_parameters: []
+slurm_accounting_storage_enforce: associations,limits,qos
+slurm_accounts: []
+slurm_admin_account: compute-account
+slurm_accounts_managed: "{{ ([slurm_admin_account] + slurm_accounts) | unique }}"
+
 # Maximum run time limit for jobs. Format is minutes, minutes:seconds, hours:minutes:seconds, days-hours, days-hours:minutes, days-hours:minutes:seconds or "UNLIMITED". Time resolution is one minute and second values are rounded up to the next minute. This limit does not apply to jobs executed by SlurmUser or user root.
 # Sets: MaxTime={{ slurm_max_job_timelimit }}
 # Default: INFINITE

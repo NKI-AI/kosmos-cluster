@@ -229,8 +229,10 @@
     PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
   run_once: true
 
-- name: create account
-  command: sacctmgr -i add account compute-account Description="Compute Accounts" Organization="Prestige"
+- name: create accounts
+  command: >-
+    sacctmgr -i add account {{ item }}
+    Description="{{ item }}"
   register: create_account_result
   failed_when: >
     create_account_result.rc != 0 and
@@ -241,6 +243,8 @@
     'Nothing new added' not in create_account_result.stdout and
     'Nothing added' not in create_account_result.stdout and
     'Already existing' not in create_account_result.stdout
+  loop: "{{ slurm_accounts_managed }}"
+  run_once: true
   environment:
     PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
 
@@ -280,7 +284,7 @@
     PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
 
 - name: create users
-  command: sacctmgr -i create user {{ item }} account=compute-account adminlevel=None
+  command: sacctmgr -i create user {{ item }} account={{ slurm_admin_account }} adminlevel=None
   register: create_user_result
   failed_when: >
     create_user_result.rc != 0 and
@@ -333,6 +337,20 @@
   changed_when: false
   run_once: true
   when: slurm_manage_gpus | bool and not ansible_check_mode
+  environment:
+    PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
+
+# Reapplied every run; does not change user-level MaxJobsAccrue.
+- name: set MaxJobsAccrue on managed accounts
+  command: >-
+    sacctmgr -i modify account {{ item }} set
+    MaxJobsAccrue={{ slurm_max_jobs_accrue }}
+  loop: "{{ slurm_accounts_managed }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+  run_once: true
+  when: slurm_max_jobs_accrue is defined
   environment:
     PATH: '{{ slurm_install_prefix }}/bin:{{ ansible_env.PATH }}'
 
