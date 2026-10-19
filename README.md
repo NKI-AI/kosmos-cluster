@@ -25,6 +25,18 @@
 > **Slurm secrets:** not in git. See
 > [docs/kosmos/slurm-secrets.md](docs/kosmos/slurm-secrets.md).
 >
+> **Slurm backups:** `/mnt/kronos/data_public/slurm_backup` on the cluster nodes
+> (`kronos:/data-pool/data_public/slurm_backup` on the file server). It belongs to
+> all sudoers: `root:teuwen-sudoers`, folders `2770`, files `660`. Keep it that way
+> when adding a backup, and do not copy with `cp -a <dir>/. <dest>/`, which also
+> copies `<dir>`'s owner and mode onto `<dest>`. Since 2026-10-19 it holds the
+> reinstall backups from 2026-10-05: `20261005T140822-slurm-23.02.4` (Slurm 23.02
+> accounting database dump, `sacctmgr` dump, job history, logs; check with
+> `sha256sum -c SHA256SUMS`) and `reinstall-2026-10-05` (host snapshot, check with
+> `sha256sum -c reinstall-snapshot.sha256`). New backups are made with
+> `playbooks/slurm-cluster/slurm-backup.yml`, which writes them to
+> `/var/backups/slurm` on atlas; copy them here afterwards.
+>
 > **Adding or removing a compute node.** Everything lives in `config/`:
 >
 > - `config/inventory`: list the host under `[all]` (with `ansible_host=`), under

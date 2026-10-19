@@ -25,6 +25,9 @@
 # name> on the Ansible node, so losing the controller disk (or reinstalling
 # it) does not lose the dump.
 #
+# Backups to keep go to /mnt/kronos/data_public/slurm_backup afterwards
+# (root:teuwen-sudoers, see the README).
+#
 # Refuses --check: dumps cannot be simulated.
 
 - name: Back up Slurm accounting database, state and installed files on the controller

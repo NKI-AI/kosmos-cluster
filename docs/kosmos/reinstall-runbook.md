@@ -15,6 +15,9 @@ servers are not part of this maintenance.
   after the kronos crash). The snapshot is in the network home and in
   `/data/groups/public/backups/reinstall-2026-10-05` (sha256 checked). Before
   2.4, check that `~/slurm-backup/<dir>` passes `sha256sum -c SHA256SUMS`.
+  Since 2026-10-19 both the snapshot and the Slurm backup live in
+  `/mnt/kronos/data_public/slurm_backup` (see the README); the
+  `/data/groups/public/backups` copy is deleted.
 - 2026-10-06, first batch atlas, kosmos, gaia, aristarchus, herakles:
   2.1-2.3 done (2.3 needed the root squash fix, deviations 42/43).
   aristarchus `Gres=gpu:6`, herakles `gpu:8`, all three nodes IDLE, 17 QOS
