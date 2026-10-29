@@ -36,9 +36,9 @@ roentgen            ansible_host=roentgen
 atlas               ansible_host=atlas
 kosmos              ansible_host=kosmos
 
-# Storage
-# rhea              ansible_host=rhea
-# kronos            ansible_host=kronos
+# Storage: rhea and kronos are in config/inventory-file-servers, not here.
+# Do not add them: every host in this file is in `all`, which most plays
+# in slurm-cluster.yml target.
 
 # Outside slurm cluster
 # [outside]

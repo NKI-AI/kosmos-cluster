@@ -406,6 +406,12 @@ slurm_monitoring_group: "slurm-master"
 grafana_container: "grafana/grafana:13.1.7"
 prometheus_container: "prom/prometheus:v3.13.4"
 
+# kosmos: node exporters outside the inventory that Prometheus also scrapes:
+# the file servers, installed by
+# playbooks/slurm-cluster/file-server-node-exporter.yml. Keep equal to the
+# [file-server] group in config/inventory-file-servers.
+node_exporter_extra_targets: [rhea, kronos]
+
 ################################################################################
 # Logging with rsyslog                                                         #
 ################################################################################

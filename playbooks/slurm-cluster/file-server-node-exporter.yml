@@ -1,0 +1,45 @@
+---
+# kosmos: Prometheus node exporter on the NFS file servers (rhea, kronos),
+# from the Ubuntu package: no docker, no Slurm, no GPU software there. The
+# hosts are in their own inventory file, which is used only when named
+# (see config/inventory-file-servers for why they are not in config/inventory):
+#
+#   ansible-playbook -K -i config/inventory-file-servers \
+#       playbooks/slurm-cluster/file-server-node-exporter.yml
+#
+# -K: sudo password. Check first that ssh works (`ssh rhea true`).
+#
+# Prometheus on atlas scrapes them through node_exporter_extra_targets in
+# config/group_vars/slurm-cluster.yml. The endpoints file on atlas picks the
+# list up on the next run of the node exporter playbook there (Prometheus
+# rereads it without a restart):
+#
+#   ansible-playbook -K -l atlas playbooks/slurm-cluster/prometheus-node-exporter.yml
+
+- hosts: "{{ hostlist | default('file-server') }}"
+  become: true
+  tasks:
+    - name: check that the host runs Ubuntu
+      assert:
+        that: ansible_distribution == 'Ubuntu'
+        fail_msg: "{{ inventory_hostname }} runs {{ ansible_distribution }}; this playbook installs the Ubuntu package"
+
+    # Without recommends: prometheus-node-exporter-collectors would add
+    # root timers (apt, smartmon, ...) on the file servers.
+    - name: install the node exporter
+      apt:
+        name: prometheus-node-exporter
+        state: present
+        install_recommends: false
+        update_cache: yes
+        cache_valid_time: 3600
+      environment: "{{ proxy_env if proxy_env is defined else {} }}"
+      register: file_server_node_exporter_pkg
+
+    # In --check the package is not installed, so the unit does not exist yet.
+    - name: enable and start the node exporter
+      systemd:
+        name: prometheus-node-exporter
+        state: started
+        enabled: true
+      when: not (ansible_check_mode and file_server_node_exporter_pkg is changed)

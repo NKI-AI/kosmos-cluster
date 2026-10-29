@@ -1,0 +1,15 @@
+#
+# kosmos: the NFS file servers, for playbooks/slurm-cluster/file-server-node-exporter.yml only:
+#
+#   ansible-playbook -K -i config/inventory-file-servers playbooks/slurm-cluster/file-server-node-exporter.yml
+#
+# Not in config/inventory on purpose: every host there is in `all`, and most
+# plays in slurm-cluster.yml default to `all` (kernel and reboot, NVIDIA
+# driver, docker, ...). Prometheus on atlas scrapes them through
+# node_exporter_extra_targets in config/group_vars/slurm-cluster.yml; keep
+# that list equal to this group.
+#
+
+[file-server]
+rhea                ansible_host=rhea
+kronos              ansible_host=kronos

@@ -502,6 +502,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 49 | `roles/slurm/templates/etc/slurm/slurm.conf`, `roles/slurm/defaults/main.yml`, `roles/slurm/tasks/controller.yml`, `config/group_vars/slurm-cluster.yml` | site config sets `priority/multifactor` (role default `priority/basic`); weights are `slurm_priority_weights` (Age=1000, others 0); `SchedulerParameters` from `slurm_scheduler_parameters` (`bf_window=43200`); `AccountingStorageEnforce` unchanged (`associations,limits,qos`; `accrue` is not a value Slurm 26.05 accepts: on 2026-10-07 it made `sacctmgr`, `scontrol` and the daemons refuse `slurm.conf`, and `MaxJobsAccrue` is an association limit enforced through `limits`); `slurm_accounts_managed` creates `aifo`/`radiology`/`mann`/`compute-account` and sets `MaxJobsAccrue=2` (not root/QOS/users) | template hardcoded `PriorityType=priority/basic` and commented example weights (deviation 23); no SchedulerParameters (Slurm backfill defaults, including `bf_window=1440`) | Age-only multifactor so pending jobs climb for one day (integer resolution: ~86 s per point at weight 1000) then cap; ties fall to submit time. Age does not accrue while held or dependent. At most two pending jobs per user accrue Age, so a bulk submit does not age all thirty. Fair share, QOS ranks, TRES/assoc weights, partition PriorityJobFactor, DefaultTime, AccountingStorageTRES and preemption stay as they were. Backfill looks 30 days ahead so a 7- or 30-day job can still fill a hole. Flip: `slurm_priority_type: priority/basic`, delete `slurm_scheduler_parameters` and `slurm_max_jobs_accrue` | 2026-10-07 |
 | 50 | `roles/slurm/defaults/main.yml` (`slurm_conf_validate`), `roles/slurm/tasks/{controller,compute,misc-node}.yml` | every `slurm.conf` template task has `validate: env SLURM_CONF=%s <prefix>/bin/scontrol show hostnames localhost`: Slurm's own parser checks the rendered file before it is written; on an error the task fails and the old file stays | written unchecked | 2026-10-07 deploy: an invalid `AccountingStorageEnforce` value (`accrue`, deviation 49) reached `/sw/.slurm/slurm.conf`; every client and daemon refused the file and `pam_slurm_adopt` ended every ssh login to the compute nodes, Ansible's included ("Admin lockout"). Syntax check and ansible-lint do not parse Slurm values. `scontrol` parses the whole file at start-up and exits 1 on a rejected value; `show hostnames` needs no slurmctld (checked: rc 0 with an unreachable `SlurmctldHost`, rc 1 for `accrue` and for a bad `SelectTypeParameters` token). Does not check `gres.conf`, `cgroup.conf` or values Slurm only rejects at daemon start. Flip: set `slurm_conf_validate` to a command that always succeeds, or remove the `validate:` lines | 2026-10-07 |
 | 51 | `roles/slurm/tasks/compute.yml` (both `/etc/pam.d/sshd` blocks) | the `pam_listfile` lines for `/etc/localusers` and `/etc/localgroups` come before `pam_slurm_adopt` | `pam_slurm_adopt` (`action_no_jobs=ignore`) first, admins after it | Part 1 of the fix in "Admin lockout through pam_slurm_adopt": `pam_slurm_adopt` calls `fatal()` inside sshd when it cannot read `slurm.conf`, so the admin lines were never reached and admins were locked out with everyone else (2026-10-05 `/sw` gone, 2026-10-07 invalid value). A `sufficient` success ends the account stack, so admins never run Slurm code at login. Users are unchanged (adopted with a job, refused without). Cost: an admin's ssh session is not adopted into the cgroup of their own job on that node. The `blockinfile` markers are unchanged, so a run replaces the block in place. Flip: put the `pam_slurm_adopt ... action_no_jobs=ignore` line first again | 2026-10-07 |
+| 52 | `config/inventory-file-servers` (new), `config/inventory` (storage comment), `playbooks/slurm-cluster/file-server-node-exporter.yml` (new), `roles/prometheus-node-exporter/{defaults/main.yml,templates/node-exporter.yml.j2}`, `config/group_vars/slurm-cluster.yml` (`node_exporter_extra_targets`) | the file servers rhea and kronos get Ubuntu's `prometheus-node-exporter` package (without recommends) from their own playbook and inventory file; Prometheus on atlas scrapes them through `node_exporter_extra_targets: [rhea, kronos]`, appended to the `slurm-node` targets in the endpoints file (same job and `module: node-exporter` label, so the `InstanceDown` alert covers them) | rhea and kronos commented out in the inventory; nothing monitors them | Wanted in Grafana (2026-10-29): node exporter only, no Slurm, no GPU. Kept out of `config/inventory` because every host there is in `all` and most `slurm-cluster.yml` plays default to `all` (chrony, `kernel.yml` with its reboot, driver, CUDA, docker, motd): one run without `--limit` would reach the NFS servers every node mounts `/home` and `/sw` from. The package instead of the docker container, so the file servers get no docker-ce and no docker iptables rules. Its version is the distribution's, not the nodes' v1.11.1; the `node_*` metric names are the same. Flip: `node_exporter_extra_targets: []`, rerun the node exporter playbook on atlas, `apt remove prometheus-node-exporter` on both | 2026-10-29 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -640,6 +641,32 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   if modules are ever published there, or decide to drop Lmod
   (`slurm_install_lmod`). Configless Slurm (below) removes the `slurm.conf`
   part of the dependency.
+- **Next patch: node exporter on the file servers** (prepared 2026-10-29,
+  deviation 52, not run yet). From teuwen-ansible, after checking that ssh
+  and sudo work on rhea and kronos:
+
+  ```bash
+  ansible-playbook -K --check --diff -i config/inventory-file-servers \
+      playbooks/slurm-cluster/file-server-node-exporter.yml | cat
+  ansible-playbook -K -i config/inventory-file-servers \
+      playbooks/slurm-cluster/file-server-node-exporter.yml | cat
+  ansible-playbook -K --check --diff -l atlas playbooks/slurm-cluster/prometheus-node-exporter.yml | cat
+  ansible-playbook -K -l atlas playbooks/slurm-cluster/prometheus-node-exporter.yml | cat
+  ```
+
+  The check run of the first playbook shows the package as changed and
+  skips the service task (no unit before the install). Expected on atlas:
+  only `/etc/prometheus/endpoints/node-exporter.yml` changes (two targets
+  added). Check from atlas that
+  `curl -s http://rhea:9100/metrics | grep -m1 node_uname_info` answers
+  (also for kronos; no answer means a firewall on the file server), then
+  `http://atlas:9090/targets` lists `rhea:9100` and `kronos:9100` UP. Later
+  runs of the node exporter playbook on the other nodes rewrite their
+  copy of the same file too (shown as changed, harmless: only atlas's
+  Prometheus reads it). Grafana: the only provisioned dashboard ("GPU
+  Nodes") takes its host list from DCGM metrics, so hosts without GPUs
+  (the file servers, gaia) are not in it; a node dashboard is still to be
+  decided.
 - **After go-live, team decision: `EnforcePartLimits=ALL`** (found in the
   stress test 2026-10-07). `slurm.conf` does not set it (nor does master),
   so the default `NO` applies: a job whose QOS is not in the partition's
