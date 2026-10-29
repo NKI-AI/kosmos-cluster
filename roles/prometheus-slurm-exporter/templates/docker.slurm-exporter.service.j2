@@ -3,6 +3,8 @@ Description=Prometheus Slurm Exporter
 After=docker.service
 Requires=docker.service
 PartOf=docker.service
+After=munge.service
+PartOf=munge.service
 
 [Service]
 TimeoutStartSec=0
