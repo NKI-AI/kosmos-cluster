@@ -689,6 +689,45 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   do: decide, add the line to `roles/slurm/templates/etc/slurm/slurm.conf`,
   run the controller play (slurmctld reads it on `scontrol reconfigure`),
   announce it, and change runbook step 2.6 back to "is rejected".
+- **When 26.11 is released and has a point release: upgrade Slurm to 26.11,
+  then GPU selection by NVLink (`AutoDetect=nvml`)** (recorded
+  2026-11-09). Trigger: users found FSDP slow on the A100 nodes because
+  their GPUs sat on both sockets. Cause: Slurm hands out GPUs on the
+  sockets where it placed the job's CPUs (`_set_node_bits` in
+  `src/plugins/select/cons_tres/gres_select_filter.c`), so a job whose CPUs
+  span both sockets gets GPUs from both. Decided for now (2026-11-09):
+  users add `--gres-flags=enforce-binding` to multi-GPU jobs; the sbatch man
+  page says a 2-GPU job then waits for two GPUs on one socket. Not a
+  cluster default (`SelectTypeParameters=...,ENFORCE_BINDING_GRES`):
+  alanturing and hamilton have all 8 GPUs on socket 0 (10 cores) and
+  `DefCpuPerGPU=4`, so only 5 of their 8 GPUs could run at once.
+  `AutoDetect=nvml` would also tell Slurm which GPUs share an NVLink bridge
+  (the A100 and A6000 nodes are bridged in pairs), but every 26.05 release
+  (26.05.5 included) sorts that link matrix backwards: after the first GPU
+  it picks the least-linked one on the socket, so a 2-GPU job would miss its
+  NVLink partner. `AutoDetect=nvidia` provides no links, so GPUs go in PCI
+  order. SchedMD fixed it on master only (a91ef327bd "Fix link-count sort
+  order in GRES selection", 7714f4e162 "Fix restart index in link-based
+  GRES selection", 2026-08-11); 26.11.0rc1 (2026-11-06) has both. To do,
+  in a planned maintenance, not a patch day: back up the database
+  (`slurm-backup.yml`), read the 26.11 release notes for removed or renamed
+  `slurm.conf` options, update `slurm_version` and `slurm_src_sha256`,
+  let slurmdbd convert the database before slurmctld starts, rebuild on
+  every host, rerun the runbook tests. For NVML, the build needs `nvml.h`:
+  the role's `slurm_autodetect_nvml: true` installs the latest full CUDA
+  toolkit on every Slurm host (`nvidia_cuda` role) and a profile script
+  that puts it on everyone's PATH; installing only `cuda-nvml-dev-13-0`
+  (matches driver 580) on the GPU nodes and configuring with
+  `--with-nvml=/usr/local/cuda-13.0/targets/x86_64-linux` is enough
+  (configure looks for `include/nvml.h` and `lib/stubs/libnvidia-ml.so`).
+  An unchanged version does not rebuild, so add `slurm_force_rebuild` or a
+  check for `/usr/local/lib/slurm/gpu_nvml.so`. Check that file before
+  restarting slurmd: a build without NVML does not fail, slurmd only logs
+  "We were configured to autodetect nvml functionality, but we weren't able
+  to find that lib when Slurm was configured" and falls back to
+  `gpu/generic` (no detection, no device files, no CPU affinity;
+  `src/interfaces/gpu.c`). The same fallback makes `AutoDetect=nvml`
+  harmless on gaia, which has no driver.
 - **Low priority: MySQL connector deprecation.** The slurm role installs
   `python3-mysqldb` for the `community.mysql` modules on atlas, which warn
   that MySQLdb support will be removed (and that `column_case_sensitive`

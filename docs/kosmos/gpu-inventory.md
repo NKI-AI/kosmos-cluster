@@ -99,8 +99,11 @@ plato and schrodinger were never read by any template.
 nvidia` in `config/group_vars/slurm-cluster.yml`). slurmd then reads the
 device minors itself and converts each GPU's CPU list to Slurm core ids;
 no NVML build and no CUDA toolkit are needed. It does not
-detect NVLinks (`AutoDetect=nvml` would, and could prefer bridged pairs on the
-A6000/A100 nodes). `Gres=gpu:N` in slurm.conf stays untyped and still matches.
+detect NVLinks. `AutoDetect=nvml` would, but Slurm 26.05 sorts the links
+backwards and then prefers the least-linked GPU on a socket; fixed in 26.11
+(see the 26.11 item in `porting-notes.md`, section 2). Until then users
+who want their GPUs on one socket add `--gres-flags=enforce-binding`.
+`Gres=gpu:N` in slurm.conf stays untyped and still matches.
 The driver must be loaded before slurmd starts, or the node reports fewer
 GPUs than configured and is drained: `playbooks/slurm-cluster.yml` installs
 the driver before Slurm. Check after the reinstall with
