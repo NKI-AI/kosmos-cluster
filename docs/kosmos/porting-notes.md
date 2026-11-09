@@ -503,6 +503,7 @@ unreachable hosts; 13 minutes, 32k log lines. Log:
 | 50 | `roles/slurm/defaults/main.yml` (`slurm_conf_validate`), `roles/slurm/tasks/{controller,compute,misc-node}.yml` | every `slurm.conf` template task has `validate: env SLURM_CONF=%s <prefix>/bin/scontrol show hostnames localhost`: Slurm's own parser checks the rendered file before it is written; on an error the task fails and the old file stays | written unchecked | 2026-10-07 deploy: an invalid `AccountingStorageEnforce` value (`accrue`, deviation 49) reached `/sw/.slurm/slurm.conf`; every client and daemon refused the file and `pam_slurm_adopt` ended every ssh login to the compute nodes, Ansible's included ("Admin lockout"). Syntax check and ansible-lint do not parse Slurm values. `scontrol` parses the whole file at start-up and exits 1 on a rejected value; `show hostnames` needs no slurmctld (checked: rc 0 with an unreachable `SlurmctldHost`, rc 1 for `accrue` and for a bad `SelectTypeParameters` token). Does not check `gres.conf`, `cgroup.conf` or values Slurm only rejects at daemon start. Flip: set `slurm_conf_validate` to a command that always succeeds, or remove the `validate:` lines | 2026-10-07 |
 | 51 | `roles/slurm/tasks/compute.yml` (both `/etc/pam.d/sshd` blocks) | the `pam_listfile` lines for `/etc/localusers` and `/etc/localgroups` come before `pam_slurm_adopt` | `pam_slurm_adopt` (`action_no_jobs=ignore`) first, admins after it | Part 1 of the fix in "Admin lockout through pam_slurm_adopt": `pam_slurm_adopt` calls `fatal()` inside sshd when it cannot read `slurm.conf`, so the admin lines were never reached and admins were locked out with everyone else (2026-10-05 `/sw` gone, 2026-10-07 invalid value). A `sufficient` success ends the account stack, so admins never run Slurm code at login. Users are unchanged (adopted with a job, refused without). Cost: an admin's ssh session is not adopted into the cgroup of their own job on that node. The `blockinfile` markers are unchanged, so a run replaces the block in place. Flip: put the `pam_slurm_adopt ... action_no_jobs=ignore` line first again | 2026-10-07 |
 | 52 | `config/inventory-file-servers` (new), `config/inventory` (storage comment), `playbooks/slurm-cluster/file-server-node-exporter.yml` (new), `roles/prometheus-node-exporter/{defaults/main.yml,templates/node-exporter.yml.j2}`, `config/group_vars/slurm-cluster.yml` (`node_exporter_extra_targets`) | the file servers rhea and kronos get Ubuntu's `prometheus-node-exporter` package (without recommends) from their own playbook and inventory file; Prometheus on atlas scrapes them through `node_exporter_extra_targets: [rhea, kronos]`, appended to the `slurm-node` targets in the endpoints file (same job and `module: node-exporter` label, so the `InstanceDown` alert covers them) | rhea and kronos commented out in the inventory; nothing monitors them | Wanted in Grafana (2026-10-29): node exporter only, no Slurm, no GPU. Kept out of `config/inventory` because every host there is in `all` and most `slurm-cluster.yml` plays default to `all` (chrony, `kernel.yml` with its reboot, driver, CUDA, docker, motd): one run without `--limit` would reach the NFS servers every node mounts `/home` and `/sw` from. The package instead of the docker container, so the file servers get no docker-ce and no docker iptables rules. Its version is the distribution's, not the nodes' v1.11.1; the `node_*` metric names are the same. Flip: `node_exporter_extra_targets: []`, rerun the node exporter playbook on atlas, `apt remove prometheus-node-exporter` on both | 2026-10-29 |
+| 53 | `roles/create-mounts/tasks/main.yml`, `roles/create-mounts/defaults/main.yml` (`create_mounts_retired`) | kronos `groups/public` is no longer mounted; rhea `project-pool/projects` is mounted at `/mnt/rhea/projects`, next to `/mnt/rhea/data_{public,private}`. The role lazily unmounts every path in `create_mounts_retired` (`/data/groups/public`, `/projects`) that is still mounted and removes its directory when empty (`rmdir`; a non-empty one is left and the task reports the error) | mounts `/data/groups/public` and rhea projects at `/projects` | Decided by the admins for the patch day of 2026-11-09. `mount -a` never unmounts, so without the cleanup tasks the old mounts would stay until the next reboot. Lazy unmount because `/projects` carries one NFSv4 submount per project dataset (rhea exports with crossmnt, see "Fact gathering fails on nodes with many NFS submounts") and a plain `umount` fails while any is held open; processes that hold a file there keep it until they close it. Paths in user scripts, job scripts, symlinks and virtualenvs/conda envs created under `/projects` (their shebangs hold the absolute path) break. Flip: restore both fstab lines and directories, empty `create_mounts_retired`, rerun `create_mounts.yml` | 2026-11-09 |
 
 ### Master changes not carried over (superseded upstream)
 
@@ -897,7 +898,7 @@ Kerberos realm (2026-10-07).
 - `playbooks/slurm-cluster/mount_scratch_disks.yml` runs `exportfs -a` and
   `mount -a` unconditionally on every run (always reports "changed").
 
-- **Potential follow-up, shared mounts:** move the eleven kronos/rhea mount
+- **Potential follow-up, shared mounts:** move the ten kronos/rhea mount
   definitions and their common options into structured site variables in
   `config/group_vars/slurm-cluster.yml`. First keep the existing
   `blockinfile` marker and render the same block from those variables, so site
@@ -910,8 +911,9 @@ Kerberos realm (2026-10-07).
   `# ANSIBLE MANAGED BLOCK` needs an explicit migration. Do not leave the old
   block and individual mount entries under two managers. Check mode does not
   apply a block removal before later tasks inspect fstab, so review the complete
-  diff for duplicate or missing `/sw`, `/home`, `/projects`, `/data/groups/*`
-  and `/mnt/{kronos,rhea}/*` entries. Keep this separate from the Slurm upgrade.
+  diff for duplicate or missing `/sw`, `/home`, `/data/groups/*` and
+  `/mnt/{kronos,rhea}/*` entries (rhea projects is `/mnt/rhea/projects` since
+  2026-11-09). Keep this separate from the Slurm upgrade.
 - **Potential follow-up, scratch mounts:** generate a managed exports block
   from `mount-scratch` so removed clients disappear from `/etc/exports`, notify
   `exportfs -ra` only when it changes, and manage one mount entry per
@@ -1034,8 +1036,9 @@ area has several leftovers that need a decision (update or remove).
   play stops for that host. Cause: Ansible's mount-facts collector runs one
   `udevadm` per mount entry in a thread pool of `min(mounts, cpu_count)`
   threads. gaia has 256 CPUs and 300+ mounts (273 NFSv4 submounts under
-  `/projects`, one per project dataset touched, plus one per user home:
-  rhea exports with crossmnt), and the ssh session's soft `nofile` limit is
+  `/projects`, now `/mnt/rhea/projects`, one per project dataset touched,
+  plus one per user home: rhea exports with crossmnt), and the ssh
+  session's soft `nofile` limit is
   1024. The other nodes have ~50 mounts and are fine. The count fluctuates
   with user activity (submounts expire after `nfs_mountpoint_timeout`, 500 s,
   when unused), which is why the same step can pass at one moment and fail

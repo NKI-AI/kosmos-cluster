@@ -1,0 +1,6 @@
+---
+# Mount points this role used to manage. The role unmounts them and removes
+# their directory when empty. Drop an entry once every host is clean.
+create_mounts_retired:
+  - /data/groups/public
+  - /projects

@@ -8,13 +8,12 @@
     - /data/groups/aiforoncology
     - /data/groups/beets-tan
     - /data/groups/nkiai
-    - /data/groups/public
-    - /projects
     - /home
     - /mnt/kronos/data_private
     - /mnt/kronos/data_public
     - /mnt/rhea/data_private
     - /mnt/rhea/data_public
+    - /mnt/rhea/projects
 
 - name: add mounts to /etc/fstab
   blockinfile:
@@ -25,14 +24,36 @@
       kronos:/data-pool/groups/aiforoncology /data/groups/aiforoncology   nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
       kronos:/data-pool/groups/beets-tan     /data/groups/beets-tan       nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
       kronos:/data-pool/groups/nkiai         /data/groups/nkiai           nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
-      kronos:/data-pool/groups/public        /data/groups/public          nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
       kronos:/data-pool/data_private         /mnt/kronos/data_private     nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
       kronos:/data-pool/data_public          /mnt/kronos/data_public      nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
-      rhea:/project-pool/projects            /projects                    nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
+      rhea:/project-pool/projects            /mnt/rhea/projects           nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
       rhea:/project-pool/network_homes       /home                        nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
       rhea:/project-pool/data_private        /mnt/rhea/data_private       nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
       rhea:/project-pool/data_public         /mnt/rhea/data_public        nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
   register: update_fstab
+
+# kosmos: mount points dropped from the block above (2026-11-09: kronos
+# groups/public is no longer mounted, rhea projects moved from /projects to
+# /mnt/rhea/projects). mount -a never unmounts, so detach them here. Lazy,
+# because /projects carries one NFSv4 submount per project dataset (rhea
+# exports with crossmnt) and a plain umount fails while any is held open.
+- name: unmount retired mount points
+  shell: |
+    if mountpoint -q {{ item }}; then
+      umount --lazy {{ item }} && echo unmounted
+    fi
+  loop: "{{ create_mounts_retired }}"
+  register: retired_umount
+  changed_when: "'unmounted' in retired_umount.stdout"
+
+# rmdir only removes an empty directory. A non-empty one (files written to the
+# local disk while the share was not mounted) is reported and left alone.
+- name: remove retired mount point directories when empty
+  command: rmdir {{ item }}
+  args:
+    removes: "{{ item }}"
+  loop: "{{ create_mounts_retired }}"
+  ignore_errors: true
 
 - name: mount drives
   command: mount -a
