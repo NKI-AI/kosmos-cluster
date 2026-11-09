@@ -32,29 +32,57 @@
       rhea:/project-pool/data_public         /mnt/rhea/data_public        nfs rsize=1048576,wsize=1048576,vers=4.2,proto=tcp,timeo=100,retrans=2,hard,intr,_netdev,async,fsc,local_lock=none,nordirplus,nconnect=8 0 0
   register: update_fstab
 
-# kosmos: mount points dropped from the block above (2026-11-09: kronos
-# groups/public is no longer mounted, rhea projects moved from /projects to
-# /mnt/rhea/projects). mount -a never unmounts, so detach them here. Lazy,
-# because /projects carries one NFSv4 submount per project dataset (rhea
-# exports with crossmnt) and a plain umount fails while any is held open.
-- name: unmount retired mount points
-  shell: |
-    if mountpoint -q {{ item }}; then
-      umount --lazy {{ item }} && echo unmounted
-    fi
-  loop: "{{ create_mounts_retired }}"
-  register: retired_umount
-  changed_when: "'unmounted' in retired_umount.stdout"
-
-# rmdir only removes an empty directory. A non-empty one (files written to the
-# local disk while the share was not mounted) is reported and left alone.
-- name: remove retired mount point directories when empty
-  command: rmdir {{ item }}
-  args:
-    removes: "{{ item }}"
-  loop: "{{ create_mounts_retired }}"
-  ignore_errors: true
-
 - name: mount drives
   command: mount -a
   register: drives_mounted
+
+# kosmos: mount points dropped from the block above (2026-11-09: kronos
+# groups/public is no longer mounted, rhea projects moved from /projects to
+# /mnt/rhea/projects). mount -a never unmounts, so the old mounts are detached
+# here, their now empty local directories removed, and the compatibility
+# links created. Runs after mount -a, so the new mounts are in place even if
+# this stops on a host. Not in check mode: it cannot simulate the unmount.
+- name: retire old mount points
+  when: not ansible_check_mode
+  block:
+    # follow is off by default, so a compatibility link (from an earlier run)
+    # is not a directory and is skipped below. mountpoint and umount would
+    # resolve the link and act on its target.
+    - name: check retired mount points
+      stat:
+        path: "{{ item }}"
+      loop: "{{ create_mounts_retired }}"
+      register: retired_stat
+
+    # Lazy, because /projects carries one NFSv4 submount per project dataset
+    # (rhea exports with crossmnt) and a plain umount fails while any is held
+    # open. A process with a file open there keeps it until it closes it.
+    - name: unmount retired mount points
+      shell: |
+        if mountpoint -q {{ item.item }}; then
+          umount --lazy {{ item.item }} && echo unmounted
+        fi
+      loop: "{{ retired_stat.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.isdir | default(false)
+      register: retired_umount
+      changed_when: "'unmounted' in retired_umount.stdout"
+
+    # Removes only the empty local directory the share was mounted on. rmdir
+    # refuses a non-empty one (files written to the local disk while the share
+    # was not mounted): the task fails for that host and nothing is deleted.
+    - name: remove retired mount point directories
+      command: rmdir {{ item.item }}
+      loop: "{{ retired_stat.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.isdir | default(false)
+      changed_when: true
+
+    - name: link old paths to their new mount points
+      file:
+        path: "{{ item.path }}"
+        src: "{{ item.src }}"
+        state: link
+      loop: "{{ create_mounts_compat_links }}"

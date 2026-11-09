@@ -1,6 +1,16 @@
 ---
-# Mount points this role used to manage. The role unmounts them and removes
-# their directory when empty. Drop an entry once every host is clean.
+# Mount points this role used to manage. A real run (not check mode)
+# unmounts each one that is still mounted and removes its directory, which
+# must be empty. Drop an entry once every host is clean.
 create_mounts_retired:
   - /data/groups/public
   - /projects
+
+# Symlinks from an old path to its new mount point, so scripts, job files and
+# virtualenvs/conda envs that hold the old path keep working for a while
+# (added 2026-11-09). The path must not exist as a directory: list it in
+# create_mounts_retired too. Removing an entry here does not delete the link
+# on the hosts.
+create_mounts_compat_links:
+  - path: /projects
+    src: /mnt/rhea/projects
