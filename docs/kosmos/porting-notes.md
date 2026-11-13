@@ -737,6 +737,31 @@ issues were removed; corrections are marked "corrected 2026-09-08".
   `gpu/generic` (no detection, no device files, no CPU affinity;
   `src/interfaces/gpu.c`). The same fallback makes `AutoDetect=nvml`
   harmless on gaia, which has no driver.
+- **aristarchus and ptolemaeus run with 5 and 7 GPUs until their dead
+  A6000s are replaced** (since 2026-11-13). One RTX A6000 on each node
+  fails with "RmInitAdapter failed"; IT ruled out slot, kernel, firmware
+  and driver, the fault follows the card. Since the boot of 2026-11-13
+  ~13:27 the two cards are absent from `lspci` (they were at
+  `0000:81:00.0` on aristarchus and `0000:25:00.0` on ptolemaeus). How IT
+  hid them is not confirmed (probably the slots disabled in the BIOS), so
+  it is not known whether that survives a reboot. `Gres=gpu:N` in
+  `slurm.conf` is the `lspci` count (topology fact), so
+  `slurm.yml -l atlas,aristarchus,ptolemaeus` set 5 and 7; nothing in the
+  repo changed. The count has to match what the driver sees: with
+  `AutoDetect=nvidia` slurmd lists every card bound to the driver
+  (`/proc/driver/nvidia/gpus`), also one that cannot initialise. A
+  configured count above that makes the node invalid ("gres/gpu count
+  reported lower than configured"); a count below it keeps the first N
+  cards by position, which can include the dead one. To do: after every
+  reboot of these two nodes (next: patch day 2026-12-07), before resuming
+  them, check that `ls /proc/driver/nvidia/gpus | wc -l` and
+  `nvidia-smi -L | wc -l` both give 5 and 7. When the replacement cards
+  are in (slots enabled again if they were disabled), rerun the same
+  playbook for 6 and 8 and tell users that `--exclude=ptolemaeus` can go.
+  Do not hide a card with
+  `echo 1 > /sys/bus/pci/devices/<addr>/remove` on a node in service: on a
+  healthy card the write blocks, uninterruptibly, until every process that
+  holds the GPU (DCGM, the DCGM exporter) has closed it.
 - **Low priority: MySQL connector deprecation.** The slurm role installs
   `python3-mysqldb` for the `community.mysql` modules on atlas, which warn
   that MySQLdb support will be removed (and that `column_case_sensitive`
